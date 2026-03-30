@@ -1,0 +1,18 @@
+{
+  "Name": "nonlinear_sigma_abs_du",
+  "Nodes": [0.0, 0.1, 0.4, 0.6, 1.0],
+  "BasisOrder": 1,
+  "Coefficients": {
+    "Lambda": 0.0,
+    "SigmaA": 0.5,
+    "SigmaB": 1.5,
+    "F": 1.0,
+    "Theta": 0.0
+  },
+  "BoundaryConditions": {
+    "LeftType": "Neumann",
+    "RightType": "Dirichlet",
+    "LeftValue": 0.0,
+    "RightValue": 0.0
+  }
+}

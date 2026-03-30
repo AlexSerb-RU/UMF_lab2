@@ -1,0 +1,18 @@
+{
+  "Name": "linear_constant_sigma",
+  "Nodes": [0.0, 0.25, 0.5, 0.75, 1.0],
+  "BasisOrder": 1,
+  "Coefficients": {
+    "Lambda": 1.0,
+    "SigmaA": 2.0,
+    "SigmaB": 0.0,
+    "F": 0.0,
+    "Theta": 0.0
+  },
+  "BoundaryConditions": {
+    "LeftType": "Dirichlet",
+    "RightType": "Dirichlet",
+    "LeftValue": 0.0,
+    "RightValue": 1.0
+  }
+}
