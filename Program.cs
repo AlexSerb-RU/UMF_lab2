@@ -56,6 +56,8 @@ public class FiniteElement1D : IFiniteElement
     public int Id { get; }
     public IReadOnlyList<int> GlobalNodes { get; }
     public IReadOnlyList<IBasisFunction> BasisFunctions { get; }
+    public double LeftX { get; }
+    public double RightX { get; }
     public double Length { get; }
 
     public FiniteElement1D(int id, IReadOnlyList<int> globalNodes, double leftX, double rightX)
@@ -63,6 +65,8 @@ public class FiniteElement1D : IFiniteElement
         if (globalNodes.Count != 2) throw new ArgumentException("Linear element requires exactly 2 global nodes.");
         if (rightX <= leftX) throw new ArgumentException("rightX must be greater than leftX.");
 
+        RightX = rightX;
+        LeftX = leftX;
         Id = id;
         GlobalNodes = new ReadOnlyCollection<int>([.. globalNodes]);
         Length = rightX - leftX;
@@ -127,9 +131,9 @@ public class Mesh : IMesh
     }
 }
 
-public class GalerkinLocalAssembly : ILocalAssembly
+public class GalerkinLocalAssembly(IQuadrature quadrature) : ILocalAssembly
 {
-    private readonly IQuadrature quadrature;
+    private readonly IQuadrature quadrature = quadrature;
     private double[,] localMatrix;
     private double[] localVector;
     private int size;
@@ -138,16 +142,11 @@ public class GalerkinLocalAssembly : ILocalAssembly
     public double[] LocalVector => localVector;
     public int Size => size;
 
-    public GalerkinLocalAssembly(IQuadrature quadrature)
-    {
-        this.quadrature = quadrature ?? throw new ArgumentNullException(nameof(quadrature));
-    }
-
     public void Compute(IFiniteElement element, ICoefficients coeffs, IReadOnlyList<double> globalSolution)
     {
         if (element.BasisFunctions.Count != element.GlobalNodes.Count)
             throw new InvalidOperationException("Mismatch between basis functions and global nodes count");
-        
+
         size = element.BasisFunctions.Count;
 
         // Инициализация локальной матрицы и вектора
@@ -155,23 +154,28 @@ public class GalerkinLocalAssembly : ILocalAssembly
         localVector = new double[size];
 
         // Информация об элементе
-        double leftX = 0.0;
-        double rightX = element.Length;
+        double leftX, rightX;
         double elementLength = element.Length;
         IReadOnlyList<int> globalNodes = element.GlobalNodes;
         IReadOnlyList<IBasisFunction> basis = element.BasisFunctions;
 
-        // Получить координаты узлов элемента (предполагаем линейный элемент)
-        if (globalNodes.Count == 2)
+        // Приведение типа к FiniteElement1D для получения координат
+        if (element is FiniteElement1D elem1D)
         {
-            // Для линейного элемента нужны координаты левого и правого узла
-            // Это требует доступа к mesh, поэтому предполагаем, что leftX и rightX известны
-            // Альтернатива: передать в метод координаты узлов
-            leftX = 0.0;
-            rightX = elementLength;
+            leftX = elem1D.LeftX;
+            rightX = elem1D.RightX;
+        }
+        else
+        {
+            throw new NotSupportedException($"Element type {element.GetType().Name} is not supported");
         }
 
         // Численное интегрирование по точкам Гаусса
+        GaussIntegrate(coeffs, globalSolution, leftX, rightX, elementLength, globalNodes, basis);
+    }
+
+    private void GaussIntegrate(ICoefficients coeffs, IReadOnlyList<double> globalSolution, double leftX, double rightX, double elementLength, IReadOnlyList<int> globalNodes, IReadOnlyList<IBasisFunction> basis)
+    {
         var quadPoints = quadrature.Points;
         var quadWeights = quadrature.Weights;
 
@@ -206,99 +210,22 @@ public class GalerkinLocalAssembly : ILocalAssembly
             }
 
             // Сборка локальной матрицы жесткости и масс
-            // K_ij = ∫ σ·dφ_i/dx·dφ_j/dx dx + ∫ λ·φ_i·φ_j dx
             for (int i = 0; i < size; i++)
             {
                 for (int j = 0; j < size; j++)
                 {
-                    // Вклад дифференциального оператора (жесткость)
+                    // Вклад жёсткости
                     double stiffness = sigma * phiDerivValues[i] * phiDerivValues[j];
-                    // Вклад реакционного члена (масса)
+                    // Вклад массы
                     double mass = lambda * phiValues[i] * phiValues[j];
-                    
+
                     localMatrix[i, j] += (stiffness + mass) * weight;
                 }
 
                 // Сборка локального вектора правой части
-                // f_i = ∫ φ_i · F(x) dx
                 localVector[i] += f * phiValues[i] * weight;
             }
         }
-    }
-
-    /// <summary>
-    /// Дополнительный метод: вычисление локальной матрицы жесткости (только производные)
-    /// Используется для линейных задач
-    /// </summary>
-    public double[,] ComputeStiffnessMatrix(IFiniteElement element, ICoefficients coeffs)
-    {
-        if (element == null) throw new ArgumentNullException(nameof(element));
-        if (coeffs == null) throw new ArgumentNullException(nameof(coeffs));
-
-        int sz = element.BasisFunctions.Count;
-        var K = new double[sz, sz];
-        
-        double elementLength = element.Length;
-        var basis = element.BasisFunctions;
-        var quadPoints = quadrature.Points;
-        var quadWeights = quadrature.Weights;
-
-        for (int qp = 0; qp < quadPoints.Count; qp++)
-        {
-            // Преобразование на элемент
-            double weight = quadWeights[qp] * 0.5 * elementLength;
-            
-            // Для простоты: sigma = const (из coeffs в центре)
-            double sigma = coeffs.Sigma(0.0, 0.5 * elementLength, 0.0);
-
-            for (int i = 0; i < sz; i++)
-            {
-                for (int j = 0; j < sz; j++)
-                {
-                    // K_ij = ∫ σ·dφ_i/dx·dφ_j/dx dx
-                    var phiDerivI = basis[i].Derivative(0.0);  // Упрощение
-                    var phiDerivJ = basis[j].Derivative(0.0);
-                    K[i, j] += sigma * phiDerivI * phiDerivJ * weight;
-                }
-            }
-        }
-
-        return K;
-    }
-
-    /// <summary>
-    /// Дополнительный метод: вычисление локальной матрицы масс (только реакционный член)
-    /// </summary>
-    public double[,] ComputeMassMatrix(IFiniteElement element, ICoefficients coeffs)
-    {
-        if (element == null) throw new ArgumentNullException(nameof(element));
-        if (coeffs == null) throw new ArgumentNullException(nameof(coeffs));
-
-        int sz = element.BasisFunctions.Count;
-        var M = new double[sz, sz];
-        
-        double elementLength = element.Length;
-        var basis = element.BasisFunctions;
-        var quadPoints = quadrature.Points;
-        var quadWeights = quadrature.Weights;
-
-        for (int qp = 0; qp < quadPoints.Count; qp++)
-        {
-            double weight = quadWeights[qp] * 0.5 * elementLength;
-            double lambda = coeffs.Lambda(0.0, 0.5 * elementLength);
-
-            for (int i = 0; i < sz; i++)
-            {
-                for (int j = 0; j < sz; j++)
-                {
-                    var phiI = basis[i].Value(0.0);  // Упрощение
-                    var phiJ = basis[j].Value(0.0);
-                    M[i, j] += lambda * phiI * phiJ * weight;
-                }
-            }
-        }
-
-        return M;
     }
 }
 
@@ -611,175 +538,6 @@ public class NewtonSolver : INonlinearSolver
     public double RelaxationParameter { get; set; }
 }
 
-public class NonlinearEllipticProblem : INonlinearProblem
-{
-    private readonly IMesh mesh;
-    private readonly ICoefficients coeffs;
-    private readonly IBoundaryConditions bc;
-    private readonly IGlobalAssembly assembler;
-
-    public NonlinearEllipticProblem(IMesh mesh, ICoefficients coeffs,
-        IBoundaryConditions bc, IGlobalAssembly assembler,
-        int bandwidth)
-    {
-        this.mesh = mesh ?? throw new ArgumentNullException(nameof(mesh));
-        this.coeffs = coeffs ?? throw new ArgumentNullException(nameof(coeffs));
-        this.bc = bc ?? throw new ArgumentNullException(nameof(bc));
-        this.assembler = assembler; // assembler may be null if not used
-        Size = mesh.NodeCount;
-    }
-
-    public int Size { get; private set; }
-
-    // Assemble using finite-difference style discretization on nodes (1D)
-    public void ComputeSystem(IReadOnlyList<double> q, out BandedMatrix A, out double[] b)
-    {
-        if (q == null) throw new ArgumentNullException(nameof(q));
-        int n = mesh.NodeCount;
-        A = new BandedMatrix(n, 1);
-        b = new double[n];
-
-        // handle interior nodes
-        for (int i = 0; i < n; i++)
-        {
-            for (int j = 0; j < n; j++) A[i, j] = 0.0;
-            b[i] = 0.0;
-        }
-
-        var x = new double[n];
-        for (int i = 0; i < n; i++) x[i] = mesh.GetNodeCoordinate(i);
-
-        // Precompute sigma at half-nodes using local differences
-        for (int i = 1; i < n - 1; i++)
-        {
-            double hL = x[i] - x[i - 1];
-            double hR = x[i + 1] - x[i];
-            if (hL <= 0 || hR <= 0) throw new InvalidOperationException("Mesh nodes must be strictly increasing");
-
-            double dudxL = (q[i] - q[i - 1]) / hL;
-            double dudxR = (q[i + 1] - q[i]) / hR;
-            double xLmid = 0.5 * (x[i] + x[i - 1]);
-            double xRmid = 0.5 * (x[i] + x[i + 1]);
-            double uLmid = 0.5 * (q[i] + q[i - 1]);
-            double uRmid = 0.5 * (q[i] + q[i + 1]);
-
-            double sigmaL = coeffs.Sigma(uLmid, xLmid, dudxL);
-            double sigmaR = coeffs.Sigma(uRmid, xRmid, dudxR);
-
-            double aL = sigmaL / hL;
-            double aR = sigmaR / hR;
-
-            A[i, i - 1] = -aL;
-            A[i, i] = aL + aR + coeffs.Lambda(q[i], x[i]);
-            A[i, i + 1] = -aR;
-            b[i] = coeffs.F(q[i], x[i]);
-        }
-
-        // Left boundary (i=0)
-        if (n >= 2)
-        {
-            int i = 0;
-            double hR = x[1] - x[0];
-            double dudxR = (q[1] - q[0]) / hR;
-            double xRmid = 0.5 * (x[0] + x[1]);
-            double uRmid = 0.5 * (q[0] + q[1]);
-            double sigmaR = coeffs.Sigma(uRmid, xRmid, dudxR);
-            double aR = sigmaR / hR;
-
-            if (bc.LeftType == BoundaryType.Dirichlet)
-            {
-                A[i, i] = 1.0;
-                A[i, Math.Min(n - 1, i + 1)] = 0.0;
-                b[i] = bc.LeftValue;
-            }
-            else if (bc.LeftType == BoundaryType.Neumann)
-            {
-                // natural Neumann: incorporate flux into RHS. assume LeftValue = flux (sigma*du/dx)
-                A[i, i] = aR + coeffs.Lambda(q[i], x[i]);
-                A[i, i + 1] = -aR;
-                b[i] = coeffs.F(q[i], x[i]) - bc.LeftValue;
-            }
-            else // Robin
-            {
-                // theta * u + sigma * du/dx = g  -> approximate sigma du/dx ~ sigmaR*(u1-u0)/hR
-                double theta = coeffs.Theta(q[i], x[i]);
-                A[i, i] = aR + theta + coeffs.Lambda(q[i], x[i]);
-                A[i, i + 1] = -aR;
-                b[i] = coeffs.F(q[i], x[i]) + bc.LeftValue;
-            }
-        }
-        else if (n == 1)
-        {
-            // Single node domain
-            A[0, 0] = coeffs.Lambda(q[0], x[0]);
-            b[0] = coeffs.F(q[0], x[0]);
-        }
-
-        // Right boundary (i=n-1)
-        if (n >= 2)
-        {
-            int i = n - 1;
-            double hL = x[i] - x[i - 1];
-            double dudxL = (q[i] - q[i - 1]) / hL;
-            double xLmid = 0.5 * (x[i] + x[i - 1]);
-            double uLmid = 0.5 * (q[i] + q[i - 1]);
-            double sigmaL = coeffs.Sigma(uLmid, xLmid, dudxL);
-            double aL = sigmaL / hL;
-
-            if (bc.RightType == BoundaryType.Dirichlet)
-            {
-                A[i, i] = 1.0;
-                A[i, Math.Max(0, i - 1)] = 0.0;
-                b[i] = bc.RightValue;
-            }
-            else if (bc.RightType == BoundaryType.Neumann)
-            {
-                // natural Neumann: assume RightValue = flux (sigma*du/dx) leaving domain
-                A[i, i] = aL + coeffs.Lambda(q[i], x[i]);
-                A[i, i - 1] = -aL;
-                b[i] = coeffs.F(q[i], x[i]) + bc.RightValue;
-            }
-            else // Robin
-            {
-                double theta = coeffs.Theta(q[i], x[i]);
-                A[i, i] = aL + theta + coeffs.Lambda(q[i], x[i]);
-                A[i, i - 1] = -aL;
-                b[i] = coeffs.F(q[i], x[i]) + bc.RightValue;
-            }
-        }
-    }
-
-    public double[] ComputeResidual(IReadOnlyList<double> q)
-    {
-        ComputeSystem(q, out BandedMatrix A, out double[] b);
-        int n = A.Size;
-        var R = new double[n];
-        for (int i = 0; i < n; i++)
-        {
-            double sum = 0.0;
-            for (int j = 0; j < n; j++) sum += A[i, j] * q[j];
-            R[i] = sum - b[i];
-        }
-        return R;
-    }
-
-    public double ComputeResidualNorm(IReadOnlyList<double> q)
-    {
-        var R = ComputeResidual(q);
-        double rn = Math.Sqrt(R.Select(v => v * v).Sum());
-        // normalize by b norm if possible
-        ComputeSystem(q, out _, out double[] b);
-        double bn = Math.Sqrt(b.Select(v => v * v).Sum());
-        if (bn <= 0) return rn;
-        return rn / bn;
-    }
-
-    protected IMesh Mesh => mesh;
-    protected ICoefficients Coefficients => coeffs;
-    protected IBoundaryConditions BoundaryConditions => bc;
-    protected IGlobalAssembly Assembler => assembler;
-}
-
 public class NewtonLinearization : ILinearizationStrategy
 {
     public NewtonLinearization(IQuadrature quadrature)
@@ -808,8 +566,8 @@ public class GaussQuadrature : IQuadrature
     public GaussQuadrature(int order)
     {
         Order = order;
-        points = new List<double>();
-        weights = new List<double>();
+        points = [];
+        weights = [];
 
         InitializeQuadratureRule(order);
     }
@@ -919,7 +677,7 @@ public class GaussQuadrature : IQuadrature
         return Math.Abs(sumWeights - 2.0) < 1e-10;
     }
 
-    /// Интегрирование функции f(x) на отрезке [-1, 1] по квадратуре
+    // Интегрирование функции f(x) на отрезке [-1, 1] по квадратуре
     public double Integrate(Func<double, double> f)
     {
         double result = 0.0;
@@ -1030,95 +788,350 @@ public static class ProgramRunner
     {
         var setup = ConsoleInput.StartInteractiveSession();
 
-        Console.WriteLine();
-        Console.WriteLine("Конфиг:");
-        Console.WriteLine($"Узлов: {setup.Nodes.Count}");
-        Console.WriteLine($"Порядок базиса: {setup.BasisOrder}");
-        Console.WriteLine("Узлы (первые 10):");
-        for (int i = 0; i < Math.Min(10, setup.Nodes.Count); i++)
-        {
-            Console.WriteLine($"  [{i}] = {setup.Nodes[i]}");
-        }
+        // Создание пространственной сетки
+        ISpaceMesh spaceMesh = new UniformSpaceMesh(0.0, 1.0, setup.Nodes.Count);
+        
+        // Создание временной сетки
+        ITimeMesh timeMesh = new UniformTimeMesh(0.0, 1.0, dt: 0.01);
 
-        object coeffDto = null;
-        if (setup.Coefficients is SimpleCoefficients sc)
-        {
-            coeffDto = new
-            {
-                Lambda = sc.LambdaConst,
-                SigmaA = sc.SigmaA,
-                SigmaB = sc.SigmaB,
-                F = sc.FConst,
-                Theta = sc.ThetaConst
-            };
-        }
-        else
-        {
-            coeffDto = new { Info = "Custom ICoefficients implementation" };
-        }
+        Console.WriteLine($"Пространственная сетка: {spaceMesh.NodeCount} узлов");
+        Console.WriteLine($"Временная сетка: {timeMesh.TimePoints.Count} точек");
 
-        object bcDto = null;
-        if (setup.BoundaryConditions is SimpleBoundaryConditions sbc)
-        {
-            bcDto = new
-            {
-                LeftType = sbc.LeftType.ToString(),
-                RightType = sbc.RightType.ToString(),
-                LeftValue = sbc.LeftValue,
-                RightValue = sbc.RightValue
-            };
-        }
-        else
-        {
-            bcDto = new { Info = "Custom IBoundaryConditions implementation" };
-        }
+        // Начальное условие
+        IInitialCondition initialCondition = new FunctionInitialCondition(x => Math.Sin(Math.PI * x));
 
-        var export = new
-        {
-            Nodes = setup.Nodes,
-            BasisOrder = setup.BasisOrder,
-            Coefficients = coeffDto,
-            BoundaryConditions = bcDto
-        };
+        // Параболическая задача
+        var problem = new ParabolicProblem(spaceMesh, setup.Coefficients, setup.BoundaryConditions);
 
+        // Решатели
         var linearSolver = new BandedLUSolver();
-        var nonlinearSolver = new SimpleIterationSolver(linearSolver, tolerance: 1e-8, maxIterations: 200, relaxation: 1.0);
+        var nonlinearSolver = new SimpleIterationSolver(linearSolver, tolerance: 1e-6, maxIterations: 100, relaxation: 1.0);
+        var timeIntegrator = new ImplicitEulerTimeIntegrator(nonlinearSolver);
 
-        // Build mesh and problem
-        var mesh = new Mesh(setup.Nodes, null, setup.BasisOrder);
-        var problem = new NonlinearEllipticProblem(mesh, setup.Coefficients, setup.BoundaryConditions, null, bandwidth: 1);
-
-        // initial guess: linear interpolation if both Dirichlet, otherwise zeros
-        var initial = new double[problem.Size];
-        if (problem.Size >= 2 && setup.BoundaryConditions.LeftType == BoundaryType.Dirichlet && setup.BoundaryConditions.RightType == BoundaryType.Dirichlet)
+        // Получение начального вектора
+        var u0 = new double[problem.Size];
+        for (int i = 0; i < problem.Size; i++)
         {
-            double x0 = mesh.GetNodeCoordinate(0);
-            double xN = mesh.GetNodeCoordinate(problem.Size - 1);
-            double u0 = setup.BoundaryConditions.LeftValue;
-            double uN = setup.BoundaryConditions.RightValue;
-            for (int i = 0; i < problem.Size; i++)
-            {
-                double xi = mesh.GetNodeCoordinate(i);
-                initial[i] = u0 + (uN - u0) * ((xi - x0) / (xN - x0));
-            }
-        }
-        else
-        {
-            for (int i = 0; i < problem.Size; i++) initial[i] = 0.0;
+            u0[i] = initialCondition.Value(spaceMesh.GetNodeCoordinate(i));
         }
 
-        Console.WriteLine("Запуск итерационного решателя...");
-        var result = nonlinearSolver.Solve(problem, initial);
+        // Решение параболической задачи
+        Console.WriteLine("Решение параболической задачи...");
+        var sw = Stopwatch.StartNew();
+        
+        var solutions = new List<double[]>();
+        var timePoints = new List<double>();
+        var uCurrent = u0;
+        
+        solutions.Add((double[])uCurrent.Clone());
+        timePoints.Add(timeMesh.TimeStart);
+        
+        int stepCount = 0;
+        for (int step = 0; step < timeMesh.TimeStepCount; step++)
+        {
+            double t = timeMesh.GetTimePoint(step);
+            double dt = timeMesh.GetTimeStep(step);
+            
+            uCurrent = timeIntegrator.TimeStep(problem, uCurrent, dt, t);
+            solutions.Add((double[])uCurrent.Clone());
+            timePoints.Add(t + dt);
+            stepCount++;
+            
+            if (stepCount % 10 == 0)
+                Console.WriteLine($"Шаг {stepCount}, t = {t + dt:F4}");
+        }
 
-        Console.WriteLine($"Результат: converged={result.Converged}, iterations={result.IterationsCount}, finalResidual={result.FinalResidual:E}");
-        Console.WriteLine("Решение (узлы):");
-        for (int i = 0; i < Math.Min(20, result.Solution.Length); i++)
-            Console.WriteLine($"  [{i}] = {result.Solution[i]:G17}");
+        sw.Stop();
 
-        // save results
-        var optionsRes = new JsonSerializerOptions { WriteIndented = true };
-        var outObj = new { Solution = result.Solution, ResidualHistory = result.ResidualHistory, Iterations = result.IterationsCount, Converged = result.Converged };
-        File.WriteAllText("results.json", JsonSerializer.Serialize(outObj, optionsRes));
-        Console.WriteLine("Результаты сохранены в results.json");
+        // Сохранение результатов
+        var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
+        var output = new
+        {
+            TimePoints = timePoints.ToArray(),
+            Solutions = solutions.Select(s => s.Take(Math.Min(10, s.Length)).ToArray()).ToArray(),
+            TotalTimeSteps = stepCount,
+            ComputationTime = sw.Elapsed.TotalSeconds
+        };
+        
+        File.WriteAllText("parabolic_results.json", JsonSerializer.Serialize(output, jsonOptions));
+        
+        Console.WriteLine($"Задача решена за {sw.Elapsed.TotalSeconds:F2} сек");
+        Console.WriteLine($"Выполнено временных шагов: {stepCount}");
+    }
+}
+
+// Равномерная пространственная сетка
+public class UniformSpaceMesh : ISpaceMesh
+{
+    private readonly List<double> nodes;
+    private readonly List<IFiniteElement> elements;
+    private readonly double leftBoundary;
+    private readonly double rightBoundary;
+
+    public IReadOnlyList<double> Nodes => nodes.AsReadOnly();
+    public IReadOnlyList<IFiniteElement> Elements => elements.AsReadOnly();
+    public int NodeCount => nodes.Count;
+    public int ElementCount => elements.Count;
+    public double LeftBoundary => leftBoundary;
+    public double RightBoundary => rightBoundary;
+
+    // Создать равномерную пространственную сетку:
+    // x₀ = leftBoundary, x₁ = leftBoundary + h, ..., x_{N-1} = rightBoundary
+    public UniformSpaceMesh(double leftBoundary, double rightBoundary, int nodeCount)
+    {
+        if (nodeCount < 2) 
+            throw new ArgumentException("nodeCount must be >= 2", nameof(nodeCount));
+        if (rightBoundary <= leftBoundary) 
+            throw new ArgumentException("rightBoundary must be > leftBoundary", nameof(rightBoundary));
+
+        this.leftBoundary = leftBoundary;
+        this.rightBoundary = rightBoundary;
+        this.nodes = new List<double>();
+        this.elements = new List<IFiniteElement>();
+
+        // Создание узлов
+        double step = (rightBoundary - leftBoundary) / (nodeCount - 1);
+        for (int i = 0; i < nodeCount; i++)
+        {
+            nodes.Add(leftBoundary + i * step);
+        }
+
+        // Создание линейных элементов
+        for (int i = 0; i < nodeCount - 1; i++)
+        {
+            var element = new FiniteElement1D(i, [i, i + 1], nodes[i], nodes[i + 1]);
+            elements.Add(element);
+        }
+    }
+
+    public double GetNodeCoordinate(int nodeId)
+    {
+        if (nodeId < 0 || nodeId >= nodes.Count)
+            throw new ArgumentOutOfRangeException(nameof(nodeId));
+        return nodes[nodeId];
+    }
+
+    public IFiniteElement GetElement(int elementId)
+    {
+        if (elementId < 0 || elementId >= elements.Count)
+            throw new ArgumentOutOfRangeException(nameof(elementId));
+        return elements[elementId];
+    }
+
+    public override string ToString()
+    {
+        return $"UniformSpaceMesh: [{LeftBoundary}, {RightBoundary}], Nodes={NodeCount}, Elements={ElementCount}";
+    }
+}
+
+// Равномерная временная сетка
+public class UniformTimeMesh : ITimeMesh
+{
+    private readonly List<double> timePoints;
+    private readonly double timeStart;
+    private readonly double timeEnd;
+    private readonly double dt;
+
+    public IReadOnlyList<double> TimePoints => timePoints.AsReadOnly();
+    public int NodeCount => timePoints.Count;
+    public int TimeStepCount => timePoints.Count - 1;
+    public double TimeStart => timeStart;
+    public double TimeEnd => timeEnd;
+
+    // Создать равномерную временную сетку:
+    // t₀ = timeStart, t₁ = timeStart + dt, ..., t_{M} = timeEnd
+    public UniformTimeMesh(double timeStart, double timeEnd, double dt)
+    {
+        if (timeEnd <= timeStart) 
+            throw new ArgumentException("timeEnd must be > timeStart", nameof(timeEnd));
+        if (dt <= 0) 
+            throw new ArgumentException("dt must be positive", nameof(dt));
+
+        this.timeStart = timeStart;
+        this.timeEnd = timeEnd;
+        this.dt = dt;
+        this.timePoints = new List<double>();
+
+        // Количество шагов
+        int nSteps = (int)Math.Ceiling((timeEnd - timeStart) / dt);
+
+        // Создание точек
+        for (int n = 0; n <= nSteps; n++)
+        {
+            double t = timeStart + n * dt;
+            if (t > timeEnd + 1e-10) break;
+            timePoints.Add(t);
+        }
+
+        // Убедиться, что последняя точка близка к timeEnd
+        if (Math.Abs(timePoints[timePoints.Count - 1] - timeEnd) > 1e-10)
+        {
+            timePoints[timePoints.Count - 1] = timeEnd;
+        }
+    }
+
+    public double GetTimeStep(int stepIndex)
+    {
+        if (stepIndex < 0 || stepIndex >= TimeStepCount)
+            throw new ArgumentOutOfRangeException(nameof(stepIndex));
+        return dt;
+    }
+
+    public double GetTimePoint(int stepIndex)
+    {
+        if (stepIndex < 0 || stepIndex >= timePoints.Count)
+            throw new ArgumentOutOfRangeException(nameof(stepIndex));
+        return timePoints[stepIndex];
+    }
+
+    public override string ToString()
+    {
+        return $"UniformTimeMesh: [{TimeStart}, {TimeEnd}], dt={dt}, TimePoints={NodeCount}, TimeSteps={TimeStepCount}";
+    }
+}
+
+/// <summary>
+/// Полная параболическая задача с дискретизацией в пространстве и времени
+/// Используется вместе с ITimeIntegrator для решения нестационарных задач
+/// </summary>
+public class ParabolicProblem : IParabolicProblem
+{
+    private readonly ISpaceMesh spaceMesh;
+    private readonly ICoefficients coeffs;
+    private readonly IBoundaryConditions bc;
+
+    public int Size => spaceMesh.NodeCount;
+
+    public ParabolicProblem(ISpaceMesh spaceMesh, ICoefficients coeffs, IBoundaryConditions bc)
+    {
+        this.spaceMesh = spaceMesh ?? throw new ArgumentNullException(nameof(spaceMesh));
+        this.coeffs = coeffs ?? throw new ArgumentNullException(nameof(coeffs));
+        this.bc = bc ?? throw new ArgumentNullException(nameof(bc));
+    }
+
+    public virtual double GetMassCoefficient(double u, double x, double t)
+    {
+        return 1.0;  // Коэффициент при ∂u/∂t
+    }
+
+    /// <summary>
+    /// Вычисляет систему для одного временного шага неявного метода Эйлера:
+    /// [M/dt + A(u^(n+1))]·u^(n+1) = M·u^n/dt + b(u^(n+1))
+    /// где M — матрица масс, A — матрица жесткости, u^n — решение на предыдущем слое
+    /// </summary>
+    public void ComputeParabolicSystem(IReadOnlyList<double> uPrev, double dt, double time,
+        out BandedMatrix A, out double[] b)
+    {
+        if (uPrev == null) throw new ArgumentNullException(nameof(uPrev));
+        if (dt <= 0) throw new ArgumentException("dt must be positive", nameof(dt));
+
+        int n = spaceMesh.NodeCount;
+        A = new BandedMatrix(n, 1);
+        b = new double[n];
+
+        var x = new double[n];
+        for (int i = 0; i < n; i++) x[i] = spaceMesh.GetNodeCoordinate(i);
+
+        double dtInv = 1.0 / dt;
+
+        // Внутренние узлы
+        for (int i = 1; i < n - 1; i++)
+        {
+            double hL = x[i] - x[i - 1];
+            double hR = x[i + 1] - x[i];
+            if (hL <= 0 || hR <= 0)
+                throw new InvalidOperationException("Mesh nodes must be strictly increasing");
+
+            double dudxL = (uPrev[i] - uPrev[i - 1]) / hL;
+            double dudxR = (uPrev[i + 1] - uPrev[i]) / hR;
+            double xLmid = 0.5 * (x[i] + x[i - 1]);
+            double xRmid = 0.5 * (x[i] + x[i + 1]);
+            double uLmid = 0.5 * (uPrev[i] + uPrev[i - 1]);
+            double uRmid = 0.5 * (uPrev[i] + uPrev[i + 1]);
+
+            double sigmaL = coeffs.Sigma(uLmid, xLmid, dudxL, time);
+            double sigmaR = coeffs.Sigma(uRmid, xRmid, dudxR, time);
+
+            double aL = sigmaL / hL;
+            double aR = sigmaR / hR;
+
+            double massCoeff = GetMassCoefficient(uPrev[i], x[i], time);
+
+            A[i, i - 1] = -aL;
+            A[i, i] = aL + aR + coeffs.Lambda(uPrev[i], x[i], time) + massCoeff * dtInv;
+            A[i, i + 1] = -aR;
+            
+            b[i] = massCoeff * uPrev[i] * dtInv + coeffs.F(uPrev[i], x[i], time);
+        }
+
+        ApplyBoundaryConditionsParabolic(uPrev, dt, time, A, b, dtInv);
+    }
+
+    private void ApplyBoundaryConditionsParabolic(IReadOnlyList<double> uPrev, double dt, double time,
+        BandedMatrix A, double[] b, double dtInv)
+    {
+        int n = spaceMesh.NodeCount;
+
+        // Левое граничное условие
+        if (bc.LeftType == BoundaryType.Dirichlet)
+        {
+            for (int j = 0; j < n; j++) A[0, j] = 0.0;
+            A[0, 0] = 1.0;
+            b[0] = bc.LeftValue;
+        }
+        else if (bc.LeftType == BoundaryType.Neumann)
+        {
+            double x0 = spaceMesh.GetNodeCoordinate(0);
+            double x1 = spaceMesh.GetNodeCoordinate(1);
+            double hR = x1 - x0;
+            double massCoeff = GetMassCoefficient(uPrev[0], x0, time);
+
+            A[0, 0] = coeffs.Lambda(uPrev[0], x0, time) + massCoeff * dtInv;
+            A[0, 1] = -coeffs.Sigma(0.5 * (uPrev[0] + uPrev[1]), 0.5 * (x0 + x1), 
+                                    (uPrev[1] - uPrev[0]) / hR, time) / hR;
+            b[0] = massCoeff * uPrev[0] * dtInv + coeffs.F(uPrev[0], x0, time) - bc.LeftValue;
+        }
+
+        // Правое граничное условие
+        int lastNode = n - 1;
+        if (bc.RightType == BoundaryType.Dirichlet)
+        {
+            for (int j = 0; j < n; j++) A[lastNode, j] = 0.0;
+            A[lastNode, lastNode] = 1.0;
+            b[lastNode] = bc.RightValue;
+        }
+        else if (bc.RightType == BoundaryType.Neumann)
+        {
+            double xN = spaceMesh.GetNodeCoordinate(lastNode);
+            double xN1 = spaceMesh.GetNodeCoordinate(lastNode - 1);
+            double hL = xN - xN1;
+            double massCoeff = GetMassCoefficient(uPrev[lastNode], xN, time);
+
+            A[lastNode, lastNode] = coeffs.Lambda(uPrev[lastNode], xN, time) + massCoeff * dtInv;
+            A[lastNode, lastNode - 1] = -coeffs.Sigma(0.5 * (uPrev[lastNode] + uPrev[lastNode - 1]),
+                                                       0.5 * (xN + xN1),
+                                                       (uPrev[lastNode] - uPrev[lastNode - 1]) / hL, time) / hL;
+            b[lastNode] = massCoeff * uPrev[lastNode] * dtInv + coeffs.F(uPrev[lastNode], xN, time) + bc.RightValue;
+        }
+    }
+
+    /// <summary>
+    /// Для интеграции с методом простой итерации (решение стационарной части)
+    /// </summary>
+    public void ComputeSystem(IReadOnlyList<double> q, out BandedMatrix A, out double[] b)
+    {
+        throw new NotImplementedException(
+            "Use ComputeParabolicSystem for parabolic problems. " +
+            "For elliptic problems, use NonlinearSpatialProblem instead.");
+    }
+
+    public double[] ComputeResidual(IReadOnlyList<double> q)
+    {
+        throw new NotImplementedException("Use ComputeParabolicSystem for parabolic problems.");
+    }
+
+    public double ComputeResidualNorm(IReadOnlyList<double> q)
+    {
+        throw new NotImplementedException("Use ComputeParabolicSystem for parabolic problems.");
     }
 }
