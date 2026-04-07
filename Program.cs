@@ -9,6 +9,12 @@ using System.Text.Json;
 
 namespace UMF_lab2;
 
+/// <summary>
+/// Базисная функция (линейная).
+/// </summary>
+/// <param name="LocalId">0 - левая, 1 - правая</param>
+/// <param name="LeftX">X левый</param>
+/// <param name="RightX">X правый</param>
 public record LinearBasisFunction(int LocalId, double LeftX, double RightX) : IBasisFunction
 {
     public double Value(double x)
@@ -26,6 +32,9 @@ public record LinearBasisFunction(int LocalId, double LeftX, double RightX) : IB
     }
 }
 
+/// <summary>
+/// Задание одномерного конечного элемента (интервала) с линейными базисными функциями.
+/// </summary>
 public class FiniteElement1D : IFiniteElement
 {
     public FiniteElement1D(int id, int leftNode, int rightNode, double leftX, double rightX)
@@ -51,6 +60,9 @@ public class FiniteElement1D : IFiniteElement
     public double RightX { get; }
 }
 
+/// <summary>
+/// Сетка по пространству.
+/// </summary>
 public class SpaceMesh : ISpaceMesh
 {
     private readonly List<double> _nodes;
@@ -82,6 +94,9 @@ public class SpaceMesh : ISpaceMesh
     public IFiniteElement GetElement(int elementId) => _elements[elementId];
 }
 
+/// <summary>
+/// Сетка по времени
+/// </summary>
 public class TimeMesh : ITimeMesh
 {
     private readonly List<double> _timePoints;
@@ -108,6 +123,9 @@ public class TimeMesh : ITimeMesh
     public double GetTimePoint(int stepIndex) => _timePoints[stepIndex];
 }
 
+/// <summary>
+/// Ленточный формат хранения матрицы. Поддерживает только диагональ и две соседнии полосы (три диагонали).
+/// </summary>
 public class BandedMatrix
 {
     private readonly double[] _diag;
@@ -125,6 +143,13 @@ public class BandedMatrix
 
     public int Size { get; }
 
+    /// <summary>
+    /// Получает или устанавливает элемент (i, j).
+    /// Поддерживает только главную диагональ и соседнии полосы.
+    /// Остальные элементы считаются нулевыми.
+    /// </summary>
+    /// <param name="i">индекс строки в глобальной матрице</param>
+    /// <param name="j">индекс столбца в глобальной матрице</param>
     public double this[int i, int j]
     {
         get
@@ -160,6 +185,10 @@ public class BandedMatrix
     }
 }
 
+/// <summary>
+/// Решатель трёхдиагональной системы линейных уравнений методом LU-разложения.
+/// Только для матриц которые имеют ненулевые элементы на главной диагонали и соседних полосах (3х диагональные).
+/// </summary>
 public class TridiagonalLUSolver : ILinearSolver
 {
     public double[] Solve(BandedMatrix matrix, double[] rhs)
@@ -203,6 +232,10 @@ public class TridiagonalLUSolver : ILinearSolver
     }
 }
 
+/// <summary>
+/// Результаты решения нелинейной системы уравнений итерационным методом (Пикар/Ньютон).
+/// Содержит полученное решение, историю сходимости и информацию о качестве решения.
+/// </summary>
 public class NonlinearSolverResult
 {
     public NonlinearSolverResult(double[] solution, double[] residualHistory, int iterationsCount, bool converged, double finalResidual, double computationTime)
@@ -223,6 +256,13 @@ public class NonlinearSolverResult
     public double ComputationTime { get; }
 }
 
+/// <summary>
+/// Решатель нелинейных систем уравнений методом простой итерации (методом Пикара).
+/// 
+/// Алгоритм на каждой итерации вычисляет линеаризованную систему уравнений,
+/// решает её линейным решателем и обновляет приближение.
+/// Сходимость проверяется по относительной норме невязки.
+/// </summary>
 public class SimpleIterationSolver : INonlinearSolver
 {
     private readonly ILinearSolver _linearSolver;
@@ -271,6 +311,9 @@ public class SimpleIterationSolver : INonlinearSolver
     }
 }
 
+/// <summary>
+/// Решатель нелинейных систем уравнений методом Ньютона.
+/// </summary>
 public class NewtonSolver : INonlinearSolver
 {
     private readonly ILinearSolver _linearSolver;
@@ -323,6 +366,12 @@ public class NewtonSolver : INonlinearSolver
     }
 }
 
+/// <summary>
+/// Интегратор времени с использованием НЕЯВНОГО метода Эйлера.
+/// 
+/// Реализует интеграцию параболического уравнения по времени, решая на каждом временном слое
+/// нелинейную систему уравнений используя переданный решатель нелинейных систем.
+/// </summary>
 public class ImplicitEulerTimeIntegrator : ITimeIntegrator
 {
     private readonly INonlinearSolver _solver;
@@ -345,6 +394,13 @@ public class ImplicitEulerTimeIntegrator : ITimeIntegrator
     }
 }
 
+/// <summary>
+/// Параболическая задача, МКЭ, схема по времени - неявная.
+/// 
+/// Метод Пикара (простой итерации) / Метод Ньютона
+/// 
+/// Использует ленточную матрицу (трёхдиагональную) для хранения матриц системы.
+/// </summary>
 public class ParabolicProblem : ILinearizableNonlinearProblem
 {
     private static readonly double[,] LocalMassTemplate = { { 2.0, 1.0 }, { 1.0, 2.0 } };
