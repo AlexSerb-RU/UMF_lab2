@@ -133,9 +133,7 @@ public class TestDefinition
 {
     public string Name { get; set; } = "unnamed_test";
     public MeshDefinition Mesh { get; set; } = new();
-    public CoefficientsDefinition Coefficients { get; set; } = new();
-    public BoundaryConditionsDefinition BoundaryConditions { get; set; } = new();
-    public InitialConditionDefinition InitialCondition { get; set; } = new();
+    public string Dataset { get; set; } = "";
     public SolverDefinition Solver { get; set; } = new();
 }
 
