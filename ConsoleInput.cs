@@ -158,47 +158,6 @@ public class IntervalSplitDefinition
     public double Q { get; set; } = 1.0;
 }
 
-public class CoefficientsDefinition
-{
-    public double? Lambda { get; set; }
-    public double? Sigma0 { get; set; }
-    public double? Sigma1 { get; set; }
-    public double SigmaEps { get; set; } = 1e-6;
-    public double? F { get; set; }
-    public CoefficientRegionDefinition[]? Regions { get; set; }
-}
-
-public class CoefficientRegionDefinition
-{
-    public double XFrom { get; set; }
-    public double XTo { get; set; }
-    public double Lambda { get; set; } = 1.0;
-    public double Sigma0 { get; set; } = 1.0;
-    public double Sigma1 { get; set; }
-    public double SigmaEps { get; set; } = 1e-6;
-    public double F { get; set; }
-}
-
-public class BoundaryConditionsDefinition
-{
-    public BoundarySideDefinition Left { get; set; } = new();
-    public BoundarySideDefinition Right { get; set; } = new();
-}
-
-public class BoundarySideDefinition
-{
-    public string Type { get; set; } = "Dirichlet";
-    public double Value { get; set; }
-    public double Beta { get; set; }
-}
-
-public class InitialConditionDefinition
-{
-    public string Type { get; set; } = "sin_pi";
-    public double Value { get; set; }
-    public double Slope { get; set; } = 1.0;
-}
-
 public class FunctionExactSolution(Func<double, double, double> func) : IExactSolution
 {
     public double Value(double x, double t) => func(x, t);
