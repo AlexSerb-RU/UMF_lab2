@@ -202,13 +202,13 @@ public class ManufacturedCoefficients : ICoefficients
     public double Sigma(double dudx, double x, double t = 0.0)
     {
         var r = Region(x);
-        return r.Sigma0 + r.Sigma1 * Math.Sqrt(dudx * dudx + r.SigmaEps * r.SigmaEps);
+        return r.Sigma0 + r.Sigma1 * Math.Sqrt(dudx * dudx/* + r.SigmaEps * r.SigmaEps*/);
     }
 
     public double DSigmaDDuDx(double dudx, double x, double t = 0.0)
     {
         var r = Region(x);
-        return r.Sigma1 * dudx / Math.Sqrt(dudx * dudx + r.SigmaEps * r.SigmaEps);
+        return r.Sigma1 * dudx / Math.Sqrt(dudx * dudx/* + r.SigmaEps * r.SigmaEps*/);
     }
 
     public double F(double x, double t = 0.0)
@@ -229,8 +229,6 @@ public static class DatasetFactory
         return datasetName.Trim().ToLowerInvariant() switch
         {
             "x2_const_lambda_sigma" => BuildX2Const(xLeft, xRight),
-            "x_plus_t_const_lambda_sigma" => BuildXPlusTConst(xLeft, xRight),
-            "sinxt_const_lambda_sigma" => BuildSinXtConst(xLeft, xRight),
             _ => throw new InvalidOperationException($"Неизвестный набор данных: {datasetName}")
         };
     }
@@ -239,65 +237,15 @@ public static class DatasetFactory
         BuildX2Const(double xLeft, double xRight)
     {
         var exact = new ManufacturedSolution(
-            (x, t) => x * x,
-            (x, t) => 2.0 * x,
-            (x, t) => 2.0,
-            (x, t) => 0.0);
+            (x, t) => x * x,  // Решение u(x,t) = x^2
+            (x, t) => 2.0 * x,  // Производная по x: u_x = 2x
+            (x, t) => 2.0,  // u_xx
+            (x, t) => 0.0);  // Производная по t: u_t = 0
 
-        var coeffs = new ManufacturedCoefficients(exact, new[]
-        {
+        var coeffs = new ManufacturedCoefficients(exact,
+        [
             new CoefficientRegion(xLeft, xRight, Lambda: 1.0, Sigma0: 1.0, Sigma1: 0.0, SigmaEps: 1e-6)
-        });
-
-        var bc = new SimpleBoundaryConditions(
-            BoundaryType.Dirichlet,
-            BoundaryType.Dirichlet,
-            t => exact.U(xLeft, t),
-            t => exact.U(xRight, t));
-
-        var ic = new FunctionInitialCondition(x => exact.U(x, 0.0));
-
-        return (exact, coeffs, bc, ic);
-    }
-
-    private static (IExactSolution, ICoefficients, IBoundaryConditions, IInitialCondition)
-        BuildXPlusTConst(double xLeft, double xRight)
-    {
-        var exact = new ManufacturedSolution(
-            (x, t) => x + t,
-            (x, t) => 1.0,
-            (x, t) => 0.0,
-            (x, t) => 1.0);
-
-        var coeffs = new ManufacturedCoefficients(exact, new[]
-        {
-            new CoefficientRegion(xLeft, xRight, Lambda: 1.0, Sigma0: 1.0, Sigma1: 0.0, SigmaEps: 1e-6)
-        });
-
-        var bc = new SimpleBoundaryConditions(
-            BoundaryType.Dirichlet,
-            BoundaryType.Dirichlet,
-            t => exact.U(xLeft, t),
-            t => exact.U(xRight, t));
-
-        var ic = new FunctionInitialCondition(x => exact.U(x, 0.0));
-
-        return (exact, coeffs, bc, ic);
-    }
-
-    private static (IExactSolution, ICoefficients, IBoundaryConditions, IInitialCondition)
-        BuildSinXtConst(double xLeft, double xRight)
-    {
-        var exact = new ManufacturedSolution(
-            (x, t) => Math.Sin(x) * Math.Exp(t),
-            (x, t) => Math.Cos(x) * Math.Exp(t),
-            (x, t) => -Math.Sin(x) * Math.Exp(t),
-            (x, t) => Math.Sin(x) * Math.Exp(t));
-
-        var coeffs = new ManufacturedCoefficients(exact, new[]
-        {
-            new CoefficientRegion(xLeft, xRight, Lambda : 1.0, Sigma0 : 1.0, Sigma1 : 0.0, SigmaEps : 1e-6)
-        });
+        ]);
 
         var bc = new SimpleBoundaryConditions(
             BoundaryType.Dirichlet,

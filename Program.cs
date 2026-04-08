@@ -832,7 +832,7 @@ public static class ProgramRunner
         var residuals = new List<double[]> { Array.Empty<double>() };
         var current = (double[])u0.Clone();
 
-        Console.WriteLine($"Метод {name}");
+        Console.WriteLine($"Метод {name} | Узлов: {spaceMesh.NodeCount}");
         for (int step = 0; step < timeMesh.TimeStepCount; step++)
         {
             double tPrev = timeMesh.GetTimePoint(step);
