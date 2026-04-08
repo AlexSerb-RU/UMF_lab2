@@ -104,3 +104,11 @@ public interface IExactSolution
 {
     double Value(double x, double t);
 }
+
+public interface IManufacturedSolution
+{
+    double U(double x, double t);
+    double Ux(double x, double t);
+    double Uxx(double x, double t);
+    double Ut(double x, double t);
+}

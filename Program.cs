@@ -569,7 +569,6 @@ public class ParabolicProblem : ILinearizableNonlinearProblem
         int adjacent = isLeft ? 1 : Size - 2;
         BoundaryType type = isLeft ? _bc.LeftType : _bc.RightType;
         double value = isLeft ? _bc.LeftValue(_time) : _bc.RightValue(_time);
-        double beta = isLeft ? _bc.LeftBeta(_time) : _bc.RightBeta(_time);
 
         switch (type)
         {
@@ -587,11 +586,6 @@ public class ParabolicProblem : ILinearizableNonlinearProblem
             case BoundaryType.Neumann:
                 b[boundary] += isLeft ? -value : value;
                 break;
-
-            case BoundaryType.Robin:
-                a[boundary, boundary] += beta;
-                b[boundary] += beta * value;
-                break;
         }
     }
 
@@ -607,7 +601,6 @@ public class ParabolicProblem : ILinearizableNonlinearProblem
         int adjacent = isLeft ? 1 : Size - 2;
         BoundaryType type = isLeft ? _bc.LeftType : _bc.RightType;
         double value = isLeft ? _bc.LeftValue(_time) : _bc.RightValue(_time);
-        double beta = isLeft ? _bc.LeftBeta(_time) : _bc.RightBeta(_time);
 
         switch (type)
         {
@@ -621,10 +614,6 @@ public class ParabolicProblem : ILinearizableNonlinearProblem
                 residual[boundary] = q[boundary] - value;
                 break;
             case BoundaryType.Neumann:
-                break;
-            case BoundaryType.Robin:
-                lin_matrix[boundary, boundary] += beta;
-                residual[boundary] += beta * (q[boundary] - value);
                 break;
         }
     }
@@ -685,6 +674,7 @@ public static class ProgramRunner
 
         throw new ArgumentOutOfRangeException(nameof(x), "Точка не принадлежит области сетки.");
     }
+
     public static void Main()
     {
         var setup = ConsoleInput.StartInteractiveSession();
@@ -786,6 +776,47 @@ public static class ProgramRunner
         return Math.Sqrt(sum / count);
     }
 
+    private static double ComputeL2ErrorIntegral(
+    ISpaceMesh mesh,
+    IReadOnlyList<double> q,
+    IExactSolution exact,
+    double time)
+    {
+        double integral = 0.0;
+
+        for (int e = 0; e < mesh.ElementCount; e++)
+        {
+            var element = (FiniteElement1D)mesh.GetElement(e);
+
+            double xL = element.LeftX;
+            double xR = element.RightX;
+            double h = xR - xL;
+
+            double mid = 0.5 * (xL + xR);
+
+            // 3-точечная квадратура Гаусса
+            double xi = Math.Sqrt(0.6);
+
+            double x1 = mid;
+            double x2 = mid + xi * h / 2.0;
+            double x3 = mid - xi * h / 2.0;
+
+            double uNum1 = EvaluateSolutionAtPoint(mesh, q, x1);
+            double uNum2 = EvaluateSolutionAtPoint(mesh, q, x2);
+            double uNum3 = EvaluateSolutionAtPoint(mesh, q, x3);
+
+            double e1 = exact.Value(x1, time) - uNum1;
+            double e2 = exact.Value(x2, time) - uNum2;
+            double e3 = exact.Value(x3, time) - uNum3;
+
+            integral += h * (8.0 * e1 * e1 + 5.0 * (e2 * e2 + e3 * e3));
+        }
+
+        integral /= 18.0;
+
+        return Math.Sqrt(integral);
+    }
+
     private static object SolveAllLayers(
         string name,
         ISpaceMesh spaceMesh,
@@ -828,7 +859,7 @@ public static class ProgramRunner
 
             if (exact is not null)
             {
-                double errL2 = ComputeDiscreteL2ErrorWithMidpoints(spaceMesh, current, exact, tNext);
+                double errL2 = ComputeL2ErrorIntegral(spaceMesh, current, exact, tNext);
 
                 Console.WriteLine(
                     $"  слой {step + 1}: t_prev={tPrev.ToString("F6", CultureInfo.InvariantCulture)}, t={tNext.ToString("F6", CultureInfo.InvariantCulture)}, dt={dt.ToString("F6", CultureInfo.InvariantCulture)}, итераций={integrator.LastIterationsCount}, невязка={lastResidual:E3}, L2(узлы+середины)={errL2:E6}");
