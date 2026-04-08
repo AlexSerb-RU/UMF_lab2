@@ -311,11 +311,6 @@ public static class DatasetFactory
     }
 }
 
-public class FunctionExactSolution(Func<double, double, double> func) : IExactSolution
-{
-    public double Value(double x, double t) => func(x, t);
-}
-
 public static class ConsoleInput
 {
     public static InteractiveSetup StartInteractiveSession()
@@ -444,11 +439,4 @@ public static class ConsoleInput
         }
     }
 
-    private static BoundaryType ParseBoundaryType(string s)
-        => s.Trim().ToLowerInvariant() switch
-        {
-            "dirichlet" or "d" => BoundaryType.Dirichlet,
-            "neumann" or "n" => BoundaryType.Neumann,
-            _ => throw new InvalidOperationException($"Неизвестный тип краевого условия: {s}")
-        };
 }
