@@ -1,0 +1,59 @@
+{
+  "name": "test3-picard",
+  "mesh": {
+    "space": {
+      "referencePoints": [ 0.0, 5.0 ],
+      "splits": [
+        {
+          "count": 5,
+          "q": 1.0
+        }
+      ]
+    },
+    "time": {
+      "referencePoints": [ 0.0, 1.0 ],
+      "splits": [
+        {
+          "count": 5,
+          "q": 1
+        }
+      ]
+    }
+  },
+  "coefficients": {
+    "regions": [
+      {
+        "xFrom": 0.0,
+        "xTo": 5.0,
+        "lambda": 1.0,
+        "sigma0": 1.0,
+        "sigma1": 0.0,
+        "sigmaEps": 1e-6,
+        "f": 0.0
+      }
+    ]
+  },
+  "boundaryConditions": {
+    "left": {
+      "type": "Dirichlet",
+      "value": 0.0,
+      "beta": 0.0
+    },
+    "right": {
+      "type": "Dirichlet",
+      "value": 0.0,
+      "beta": 0.0
+    }
+  },
+  "initialCondition": {
+    "type": "test3"
+  },
+  "solver": {
+    "primaryMethod": "picard",
+    "tolerance": 1e-8,
+    "picardMaxIterations": 300,
+    "newtonMaxIterations": 50,
+    "picardRelaxation": 1.0,
+    "newtonRelaxation": 1.0
+  }
+}

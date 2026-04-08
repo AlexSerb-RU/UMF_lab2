@@ -76,7 +76,7 @@ public class PiecewiseVariant11Coefficients : ICoefficients
     {
         var r = GetRegion(x);
         double eps = Math.Max(1e-12, r.SigmaEps);
-        return r.Sigma0 + r.Sigma1 * Math.Sqrt(dudx * dudx + eps * eps);
+        return r.Sigma0 + r.Sigma1 * dudx;
     }
 
     public double DSigmaDDuDx(double dudx, double x, double t = 0.0)
@@ -86,7 +86,8 @@ public class PiecewiseVariant11Coefficients : ICoefficients
         return r.Sigma1 * dudx / Math.Sqrt(dudx * dudx + eps * eps);
     }
 
-    public double F(double x, double t = 0.0) => GetRegion(x).F;
+    // МЕНЯТЬ
+    public double F(double x, double t = 0.0) => -2*t + (1 + 2*x*t + t)*(x*x + x);
 }
 
 public class SimpleBoundaryConditions : IBoundaryConditions
@@ -252,10 +253,11 @@ public static class ConsoleInput
         var bc = new SimpleBoundaryConditions(
             ParseBoundaryType(test.BoundaryConditions.Left.Type),
             ParseBoundaryType(test.BoundaryConditions.Right.Type),
-            _ => test.BoundaryConditions.Left.Value,
-            _ => test.BoundaryConditions.Right.Value,
-            _ => test.BoundaryConditions.Left.Beta,
-            _ => test.BoundaryConditions.Right.Beta);
+            // ЗАДАТЬ
+            t => 5,
+            t => 30*t + 5,
+            t => test.BoundaryConditions.Left.Beta,
+            t => test.BoundaryConditions.Right.Beta);
 
         var ic = BuildInitialCondition(test.InitialCondition);
 
@@ -368,6 +370,10 @@ public static class ConsoleInput
             "constant" => new FunctionInitialCondition(_ => definition.Value),
             "linear" => new FunctionInitialCondition(x => definition.Value + definition.Slope * x),
             "sin_pi" => new FunctionInitialCondition(x => Math.Sin(Math.PI * x)),
+            "test1" => new FunctionInitialCondition(x => 3),
+            "test2" => new FunctionInitialCondition(x => 5),
+            "test3" => new FunctionInitialCondition(x => 5),
+            "test4" => new FunctionInitialCondition(x => 5),
             _ => throw new InvalidOperationException($"Неизвестный тип начального условия: {definition.Type}")
         };
     }
