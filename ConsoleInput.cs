@@ -11,6 +11,7 @@ public record InteractiveSetup(
     IReadOnlyList<double> SpaceNodes,
     IReadOnlyList<double> TimePoints,
     ICoefficients Coefficients,
+    IExactSolution? ExactSolution,
     IBoundaryConditions BoundaryConditions,
     IInitialCondition InitialCondition,
     SolverDefinition Solver,
@@ -43,7 +44,7 @@ public class PiecewiseVariant11Coefficients : ICoefficients
 
     public PiecewiseVariant11Coefficients(IEnumerable<Region> regions)
     {
-        _regions = regions.OrderBy(r => r.XFrom).ToList();
+        _regions = [.. regions.OrderBy(r => r.XFrom)];
         if (_regions.Count == 0)
         {
             throw new ArgumentException("At least one coefficient region must be specified.");
@@ -197,6 +198,11 @@ public class InitialConditionDefinition
     public double Slope { get; set; } = 1.0;
 }
 
+public class FunctionExactSolution(Func<double, double, double> func) : IExactSolution
+{
+    public double Value(double x, double t) => func(x, t);
+}
+
 public static class ConsoleInput
 {
     public static InteractiveSetup StartInteractiveSession()
@@ -238,6 +244,11 @@ public static class ConsoleInput
         ValidateIncreasing(spaceNodes, "SpaceNodes");
 
         var coeffs = BuildCoefficients(test.Coefficients, spaceNodes[0], spaceNodes[^1]);
+
+        // Аналитическая функция (ХАРДКОД)
+        var exact = new FunctionExactSolution((x, t) => x + t);
+
+        // Граничные условия
         var bc = new SimpleBoundaryConditions(
             ParseBoundaryType(test.BoundaryConditions.Left.Type),
             ParseBoundaryType(test.BoundaryConditions.Right.Type),
@@ -248,7 +259,7 @@ public static class ConsoleInput
 
         var ic = BuildInitialCondition(test.InitialCondition);
 
-        return new InteractiveSetup(spaceNodes, timePoints, coeffs, bc, ic, test.Solver, test.Name);
+        return new InteractiveSetup(spaceNodes, timePoints, coeffs, exact, bc, ic, test.Solver, test.Name);
     }
 
     private static IReadOnlyList<double> BuildAxisNodes(AxisMeshDefinition axis, string axisName)

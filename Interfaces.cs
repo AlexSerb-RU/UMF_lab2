@@ -102,3 +102,8 @@ public interface ITimeIntegrator
     double[] LastResidualHistory { get; }
     int LastIterationsCount { get; }
 }
+
+public interface IExactSolution
+{
+    double Value(double x, double t);
+}

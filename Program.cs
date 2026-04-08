@@ -698,11 +698,11 @@ public static class ProgramRunner
 
         if (mode is "both" or "picard")
         {
-            picardHistory = SolveAllLayers("Picard", spaceMesh, timeMesh, setup.Coefficients, setup.BoundaryConditions, picardIntegrator, u0);
+            picardHistory = SolveAllLayers("Picard", spaceMesh, timeMesh, setup.Coefficients, setup.ExactSolution, setup.BoundaryConditions, picardIntegrator, u0);
         }
         if (mode is "both" or "newton")
         {
-            newtonHistory = SolveAllLayers("Newton", spaceMesh, timeMesh, setup.Coefficients, setup.BoundaryConditions, newtonIntegrator, u0);
+            newtonHistory = SolveAllLayers("Newton", spaceMesh, timeMesh, setup.Coefficients, setup.ExactSolution, setup.BoundaryConditions, newtonIntegrator, u0);
         }
 
         var output = new
@@ -719,11 +719,24 @@ public static class ProgramRunner
         Console.WriteLine($"Результаты сохранены в {outputFile}");
     }
 
+    private static double ComputeDiscreteL2Error(ISpaceMesh mesh, IReadOnlyList<double> numerical, IExactSolution exact, double time)
+    {
+        double sum = 0.0;
+        for (int i = 0; i < mesh.NodeCount; i++)
+        {
+            double x = mesh.GetNodeCoordinate(i);
+            double err = numerical[i] - exact.Value(x, time);
+            sum += err * err;
+        }
+        return Math.Sqrt(sum);
+    }
+
     private static object SolveAllLayers(
         string name,
         ISpaceMesh spaceMesh,
         ITimeMesh timeMesh,
         ICoefficients coeffs,
+        IExactSolution ?exact,
         IBoundaryConditions bc,
         ITimeIntegrator integrator,
         double[] u0)
@@ -749,6 +762,13 @@ public static class ProgramRunner
             double lastResidual = integrator.LastResidualHistory.Length == 0 ? 0.0 : integrator.LastResidualHistory[^1];
             Console.WriteLine(
                 $"  слой {step + 1}: t_prev={tPrev.ToString("F6", CultureInfo.InvariantCulture)}, t={tNext.ToString("F6", CultureInfo.InvariantCulture)}, dt={dt.ToString("F6", CultureInfo.InvariantCulture)}, итераций={integrator.LastIterationsCount}, невязка={lastResidual:E3}");
+
+            // Если есть точное решение, вычисляем ошибку по дискретной L2 норме
+            if (exact is not null)
+            {
+                double maxError = ComputeDiscreteL2Error(spaceMesh, current, exact, tNext);
+                Console.WriteLine($"    max|u-u*| = {maxError:E6}");
+            }
         }
 
         return new
