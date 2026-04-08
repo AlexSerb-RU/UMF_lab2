@@ -54,8 +54,7 @@ public interface ICoefficients
 public enum BoundaryType
 {
     Dirichlet,
-    Neumann,
-    Robin
+    Neumann
 }
 
 public interface IBoundaryConditions
@@ -64,8 +63,6 @@ public interface IBoundaryConditions
     BoundaryType RightType { get; }
     double LeftValue(double t);
     double RightValue(double t);
-    double LeftBeta(double t);
-    double RightBeta(double t);
 }
 
 public interface ILinearSolver
