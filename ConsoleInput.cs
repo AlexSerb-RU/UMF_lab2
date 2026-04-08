@@ -87,7 +87,7 @@ public class PiecewiseVariant11Coefficients : ICoefficients
     }
 
     // МЕНЯТЬ
-    public double F(double x, double t = 0.0) => -2*t + (1 + 2*x*t + t)*(x*x + x);
+    public double F(double x, double t = 0.0) => -2;
 }
 
 public class SimpleBoundaryConditions : IBoundaryConditions
@@ -247,17 +247,17 @@ public static class ConsoleInput
         var coeffs = BuildCoefficients(test.Coefficients, spaceNodes[0], spaceNodes[^1]);
 
         // Аналитическая функция (ХАРДКОД)
-        var exact = new FunctionExactSolution((x, t) => x + t);
+        var exact = new FunctionExactSolution((x, t) => x*x+2);
 
         // Граничные условия
         var bc = new SimpleBoundaryConditions(
             ParseBoundaryType(test.BoundaryConditions.Left.Type),
             ParseBoundaryType(test.BoundaryConditions.Right.Type),
             // ЗАДАТЬ
-            t => 5,
-            t => 30*t + 5,
-            t => test.BoundaryConditions.Left.Beta,
-            t => test.BoundaryConditions.Right.Beta);
+            _ => 2,
+            _ => 27,
+            _ => test.BoundaryConditions.Left.Beta,
+            _ => test.BoundaryConditions.Right.Beta);
 
         var ic = BuildInitialCondition(test.InitialCondition);
 
@@ -371,7 +371,7 @@ public static class ConsoleInput
             "linear" => new FunctionInitialCondition(x => definition.Value + definition.Slope * x),
             "sin_pi" => new FunctionInitialCondition(x => Math.Sin(Math.PI * x)),
             "test1" => new FunctionInitialCondition(x => 3),
-            "test2" => new FunctionInitialCondition(x => 5),
+            "test2" => new FunctionInitialCondition(x => 2),
             "test3" => new FunctionInitialCondition(x => 5),
             "test4" => new FunctionInitialCondition(x => 5),
             _ => throw new InvalidOperationException($"Неизвестный тип начального условия: {definition.Type}")

@@ -665,6 +665,26 @@ public class ParabolicProblem : ILinearizableNonlinearProblem
 
 public static class ProgramRunner
 {
+    private static double EvaluateSolutionAtPoint(ISpaceMesh mesh, IReadOnlyList<double> q, double x)
+    {
+        for (int e = 0; e < mesh.ElementCount; e++)
+        {
+            var element = (FiniteElement1D)mesh.GetElement(e);
+
+            if (x >= element.LeftX && x <= element.RightX)
+            {
+                int i0 = element.GlobalNodes[0];
+                int i1 = element.GlobalNodes[1];
+
+                double phi0 = element.BasisFunctions[0].Value(x);
+                double phi1 = element.BasisFunctions[1].Value(x);
+
+                return q[i0] * phi0 + q[i1] * phi1;
+            }
+        }
+
+        throw new ArgumentOutOfRangeException(nameof(x), "Точка не принадлежит области сетки.");
+    }
     public static void Main()
     {
         var setup = ConsoleInput.StartInteractiveSession();
@@ -731,6 +751,41 @@ public static class ProgramRunner
         return Math.Sqrt(sum);
     }
 
+    private static double ComputeDiscreteL2ErrorWithMidpoints(
+    ISpaceMesh mesh,
+    IReadOnlyList<double> numerical,
+    IExactSolution exact,
+    double time)
+    {
+        double sum = 0.0;
+        int count = 0;
+
+        // Узлы
+        for (int i = 0; i < mesh.NodeCount; i++)
+        {
+            double x = mesh.GetNodeCoordinate(i);
+            double err = numerical[i] - exact.Value(x, time);
+            sum += err * err;
+            count++;
+        }
+
+        // Середины элементов
+        for (int e = 0; e < mesh.ElementCount; e++)
+        {
+            var element = (FiniteElement1D)mesh.GetElement(e);
+            double xMid = 0.5 * (element.LeftX + element.RightX);
+
+            double uNum = EvaluateSolutionAtPoint(mesh, numerical, xMid);
+            double uExact = exact.Value(xMid, time);
+
+            double err = uNum - uExact;
+            sum += err * err;
+            count++;
+        }
+
+        return Math.Sqrt(sum / count);
+    }
+
     private static object SolveAllLayers(
         string name,
         ISpaceMesh spaceMesh,
@@ -759,15 +814,29 @@ public static class ProgramRunner
             iterations.Add(integrator.LastIterationsCount);
             residuals.Add((double[])integrator.LastResidualHistory.Clone());
 
-            double lastResidual = integrator.LastResidualHistory.Length == 0 ? 0.0 : integrator.LastResidualHistory[^1];
-            Console.WriteLine(
-                $"  слой {step + 1}: t_prev={tPrev.ToString("F6", CultureInfo.InvariantCulture)}, t={tNext.ToString("F6", CultureInfo.InvariantCulture)}, dt={dt.ToString("F6", CultureInfo.InvariantCulture)}, итераций={integrator.LastIterationsCount}, невязка={lastResidual:E3}");
+            //double lastResidual = integrator.LastResidualHistory.Length == 0 ? 0.0 : integrator.LastResidualHistory[^1];
+            //Console.Write(
+            //    $"  слой {step + 1}: t_prev={tPrev.ToString("F6", CultureInfo.InvariantCulture)}, t={tNext.ToString("F6", CultureInfo.InvariantCulture)}, dt={dt.ToString("F6", CultureInfo.InvariantCulture)}, итераций={integrator.LastIterationsCount}, невязка={lastResidual:E3}");
 
-            // Если есть точное решение, вычисляем ошибку по дискретной L2 норме
+            //// Если есть точное решение, вычисляем ошибку по дискретной L2 норме
+            //if (exact is not null)
+            //{
+            //    double maxError = ComputeDiscreteL2Error(spaceMesh, current, exact, tNext);
+            //    Console.WriteLine($", max|u-u*| = {maxError:E6}");
+            //}
+            double lastResidual = integrator.LastResidualHistory.Length == 0 ? 0.0 : integrator.LastResidualHistory[^1];
+
             if (exact is not null)
             {
-                double maxError = ComputeDiscreteL2Error(spaceMesh, current, exact, tNext);
-                Console.WriteLine($"    max|u-u*| = {maxError:E6}");
+                double errL2 = ComputeDiscreteL2ErrorWithMidpoints(spaceMesh, current, exact, tNext);
+
+                Console.WriteLine(
+                    $"  слой {step + 1}: t_prev={tPrev.ToString("F6", CultureInfo.InvariantCulture)}, t={tNext.ToString("F6", CultureInfo.InvariantCulture)}, dt={dt.ToString("F6", CultureInfo.InvariantCulture)}, итераций={integrator.LastIterationsCount}, невязка={lastResidual:E3}, L2(узлы+середины)={errL2:E6}");
+            }
+            else
+            {
+                Console.WriteLine(
+                    $"  слой {step + 1}: t_prev={tPrev.ToString("F6", CultureInfo.InvariantCulture)}, t={tNext.ToString("F6", CultureInfo.InvariantCulture)}, dt={dt.ToString("F6", CultureInfo.InvariantCulture)}, итераций={integrator.LastIterationsCount}, невязка={lastResidual:E3}");
             }
         }
 
