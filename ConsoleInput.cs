@@ -62,69 +62,6 @@ public class TestDefinition
     public SolverDefinition Solver { get; set; } = new();
 }
 
-public class PiecewiseVariant11Coefficients : ICoefficients
-{
-    public class Region
-    {
-        public double XFrom { get; init; }
-        public double XTo { get; init; }
-        public double Lambda { get; init; } = 1.0;
-        public double Sigma0 { get; init; } = 1.0;
-        public double Sigma1 { get; init; }
-        public double SigmaEps { get; init; } = 1e-6;
-        public double F { get; init; }
-    }
-
-    private readonly List<Region> _regions;
-
-    public PiecewiseVariant11Coefficients(IEnumerable<Region> regions)
-    {
-        _regions = [.. regions.OrderBy(r => r.XFrom)];
-        if (_regions.Count == 0)
-        {
-            throw new ArgumentException("At least one coefficient region must be specified.");
-        }
-        foreach (var region in _regions)
-        {
-            if (region.XTo <= region.XFrom)
-            {
-                throw new ArgumentException("Coefficient region must satisfy x_to > x_from.");
-            }
-        }
-    }
-
-    private Region GetRegion(double x)
-    {
-        foreach (var region in _regions)
-        {
-            if (x >= region.XFrom - 1e-12 && x <= region.XTo + 1e-12)
-            {
-                return region;
-            }
-        }
-        return _regions[^1];
-    }
-
-    public double Lambda(double x, double t = 0.0) => GetRegion(x).Lambda;
-
-    public double Sigma(double dudx, double x, double t = 0.0)
-    {
-        var r = GetRegion(x);
-        double eps = Math.Max(1e-12, r.SigmaEps);
-        return r.Sigma0 + r.Sigma1 * dudx;
-    }
-
-    public double DSigmaDDuDx(double dudx, double x, double t = 0.0)
-    {
-        var r = GetRegion(x);
-        double eps = Math.Max(1e-12, r.SigmaEps);
-        return r.Sigma1 * dudx / Math.Sqrt(dudx * dudx + eps * eps);
-    }
-
-    // МЕНЯТЬ
-    public double F(double x, double t = 0.0) => -2;
-}
-
 public class SimpleBoundaryConditions(
     BoundaryType leftType,
     BoundaryType rightType,
@@ -237,14 +174,14 @@ public static class DatasetFactory
         BuildX2Const(double xLeft, double xRight)
     {
         var exact = new ManufacturedSolution(
-            (x, t) => x * x,  // Решение u(x,t) = x^2
-            (x, t) => 2.0 * x,  // Производная по x: u_x = 2x
-            (x, t) => 2.0,  // u_xx
-            (x, t) => 0.0);  // Производная по t: u_t = 0
+            (x, t) => x * t,  // Решение u(x,t) = x^2
+            (x, t) => t,  // Производная по x: u_x = 2x
+            (x, t) => 0,  // u_xx
+            (x, t) => x);  // Производная по t: u_t = 0
 
         var coeffs = new ManufacturedCoefficients(exact,
         [
-            new CoefficientRegion(xLeft, xRight, Lambda: 1.0, Sigma0: 1.0, Sigma1: 0.0, SigmaEps: 1e-6)
+            new CoefficientRegion(xLeft, xRight, Lambda: 1.0, Sigma0: 0.0, Sigma1: 1.0/100.0, SigmaEps: 1e-6)
         ]);
 
         var bc = new SimpleBoundaryConditions(

@@ -298,7 +298,7 @@ public class SimpleIterationSolver : INonlinearSolver
             double rr = problem.ComputeRelativeResidual(qNew);
             history.Add(rr);
             q = qNew;
-            if (rr < _tolerance)
+            if (rr < _tolerance *10)
             {
                 sw.Stop();
                 return new NonlinearSolverResult(q, [.. history], iter, true, rr, sw.Elapsed.TotalSeconds);
@@ -353,7 +353,7 @@ public class NewtonSolver : INonlinearSolver
 
             double rr = problem.ComputeRelativeResidual(q);
             history.Add(rr);
-            if (rr < _tolerance)
+            if (rr < _tolerance * 10)
             {
                 sw.Stop();
                 return new NonlinearSolverResult(q, history.ToArray(), iter, true, rr, sw.Elapsed.TotalSeconds);
@@ -362,7 +362,7 @@ public class NewtonSolver : INonlinearSolver
 
         sw.Stop();
         double finalResidual = history.Count == 0 ? double.PositiveInfinity : history[^1];
-        return new NonlinearSolverResult(q, history.ToArray(), _maxIterations, false, finalResidual, sw.Elapsed.TotalSeconds);
+        return new NonlinearSolverResult(q, [.. history], _maxIterations, false, finalResidual, sw.Elapsed.TotalSeconds);
     }
 }
 
@@ -822,7 +822,7 @@ public static class ProgramRunner
         ISpaceMesh spaceMesh,
         ITimeMesh timeMesh,
         ICoefficients coeffs,
-        IExactSolution ?exact,
+        IExactSolution exact,
         IBoundaryConditions bc,
         ITimeIntegrator integrator,
         double[] u0)
@@ -845,30 +845,17 @@ public static class ProgramRunner
             iterations.Add(integrator.LastIterationsCount);
             residuals.Add((double[])integrator.LastResidualHistory.Clone());
 
-            //double lastResidual = integrator.LastResidualHistory.Length == 0 ? 0.0 : integrator.LastResidualHistory[^1];
-            //Console.Write(
-            //    $"  слой {step + 1}: t_prev={tPrev.ToString("F6", CultureInfo.InvariantCulture)}, t={tNext.ToString("F6", CultureInfo.InvariantCulture)}, dt={dt.ToString("F6", CultureInfo.InvariantCulture)}, итераций={integrator.LastIterationsCount}, невязка={lastResidual:E3}");
-
-            //// Если есть точное решение, вычисляем ошибку по дискретной L2 норме
-            //if (exact is not null)
-            //{
-            //    double maxError = ComputeDiscreteL2Error(spaceMesh, current, exact, tNext);
-            //    Console.WriteLine($", max|u-u*| = {maxError:E6}");
-            //}
             double lastResidual = integrator.LastResidualHistory.Length == 0 ? 0.0 : integrator.LastResidualHistory[^1];
-
-            if (exact is not null)
-            {
                 double errL2 = ComputeL2ErrorIntegral(spaceMesh, current, exact, tNext);
 
                 Console.WriteLine(
-                    $"  слой {step + 1}: t_prev={tPrev.ToString("F6", CultureInfo.InvariantCulture)}, t={tNext.ToString("F6", CultureInfo.InvariantCulture)}, dt={dt.ToString("F6", CultureInfo.InvariantCulture)}, итераций={integrator.LastIterationsCount}, невязка={lastResidual:E3}, L2(узлы+середины)={errL2:E6}");
-            }
-            else
-            {
-                Console.WriteLine(
-                    $"  слой {step + 1}: t_prev={tPrev.ToString("F6", CultureInfo.InvariantCulture)}, t={tNext.ToString("F6", CultureInfo.InvariantCulture)}, dt={dt.ToString("F6", CultureInfo.InvariantCulture)}, итераций={integrator.LastIterationsCount}, невязка={lastResidual:E3}");
-            }
+                $"  слой {step + 1}: " +
+                $"t_prev={tPrev.ToString("F6", CultureInfo.InvariantCulture)}, " +
+                $"t={tNext.ToString("F6", CultureInfo.InvariantCulture)}, " +
+                $"dt={dt.ToString("F6", CultureInfo.InvariantCulture)}, " +
+                $"итераций={integrator.LastIterationsCount}, " +
+                $"невязка={lastResidual:E3}, " +
+                $"L2={errL2:E6}");
         }
 
         return new
