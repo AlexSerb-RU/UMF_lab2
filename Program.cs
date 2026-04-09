@@ -298,7 +298,7 @@ public class SimpleIterationSolver : INonlinearSolver
             double rr = problem.ComputeRelativeResidual(qNew);
             history.Add(rr);
             q = qNew;
-            if (rr < _tolerance)
+            if (rr < _tolerance *10)
             {
                 sw.Stop();
                 return new NonlinearSolverResult(q, [.. history], iter, true, rr, sw.Elapsed.TotalSeconds);
@@ -353,7 +353,7 @@ public class NewtonSolver : INonlinearSolver
 
             double rr = problem.ComputeRelativeResidual(q);
             history.Add(rr);
-            if (rr < _tolerance)
+            if (rr < _tolerance * 10)
             {
                 sw.Stop();
                 return new NonlinearSolverResult(q, history.ToArray(), iter, true, rr, sw.Elapsed.TotalSeconds);
@@ -362,7 +362,7 @@ public class NewtonSolver : INonlinearSolver
 
         sw.Stop();
         double finalResidual = history.Count == 0 ? double.PositiveInfinity : history[^1];
-        return new NonlinearSolverResult(q, history.ToArray(), _maxIterations, false, finalResidual, sw.Elapsed.TotalSeconds);
+        return new NonlinearSolverResult(q, [.. history], _maxIterations, false, finalResidual, sw.Elapsed.TotalSeconds);
     }
 }
 
@@ -569,7 +569,6 @@ public class ParabolicProblem : ILinearizableNonlinearProblem
         int adjacent = isLeft ? 1 : Size - 2;
         BoundaryType type = isLeft ? _bc.LeftType : _bc.RightType;
         double value = isLeft ? _bc.LeftValue(_time) : _bc.RightValue(_time);
-        double beta = isLeft ? _bc.LeftBeta(_time) : _bc.RightBeta(_time);
 
         switch (type)
         {
@@ -587,11 +586,6 @@ public class ParabolicProblem : ILinearizableNonlinearProblem
             case BoundaryType.Neumann:
                 b[boundary] += isLeft ? -value : value;
                 break;
-
-            case BoundaryType.Robin:
-                a[boundary, boundary] += beta;
-                b[boundary] += beta * value;
-                break;
         }
     }
 
@@ -607,7 +601,6 @@ public class ParabolicProblem : ILinearizableNonlinearProblem
         int adjacent = isLeft ? 1 : Size - 2;
         BoundaryType type = isLeft ? _bc.LeftType : _bc.RightType;
         double value = isLeft ? _bc.LeftValue(_time) : _bc.RightValue(_time);
-        double beta = isLeft ? _bc.LeftBeta(_time) : _bc.RightBeta(_time);
 
         switch (type)
         {
@@ -621,10 +614,6 @@ public class ParabolicProblem : ILinearizableNonlinearProblem
                 residual[boundary] = q[boundary] - value;
                 break;
             case BoundaryType.Neumann:
-                break;
-            case BoundaryType.Robin:
-                lin_matrix[boundary, boundary] += beta;
-                residual[boundary] += beta * (q[boundary] - value);
                 break;
         }
     }
@@ -665,6 +654,27 @@ public class ParabolicProblem : ILinearizableNonlinearProblem
 
 public static class ProgramRunner
 {
+    private static double EvaluateSolutionAtPoint(ISpaceMesh mesh, IReadOnlyList<double> q, double x)
+    {
+        for (int e = 0; e < mesh.ElementCount; e++)
+        {
+            var element = (FiniteElement1D)mesh.GetElement(e);
+
+            if (x >= element.LeftX && x <= element.RightX)
+            {
+                int i0 = element.GlobalNodes[0];
+                int i1 = element.GlobalNodes[1];
+
+                double phi0 = element.BasisFunctions[0].Value(x);
+                double phi1 = element.BasisFunctions[1].Value(x);
+
+                return q[i0] * phi0 + q[i1] * phi1;
+            }
+        }
+
+        throw new ArgumentOutOfRangeException(nameof(x), "Точка не принадлежит области сетки.");
+    }
+
     public static void Main()
     {
         var setup = ConsoleInput.StartInteractiveSession();
@@ -731,12 +741,88 @@ public static class ProgramRunner
         return Math.Sqrt(sum);
     }
 
+    private static double ComputeDiscreteL2ErrorWithMidpoints(
+    ISpaceMesh mesh,
+    IReadOnlyList<double> numerical,
+    IExactSolution exact,
+    double time)
+    {
+        double sum = 0.0;
+        int count = 0;
+
+        // Узлы
+        for (int i = 0; i < mesh.NodeCount; i++)
+        {
+            double x = mesh.GetNodeCoordinate(i);
+            double err = numerical[i] - exact.Value(x, time);
+            sum += err * err;
+            count++;
+        }
+
+        // Середины элементов
+        for (int e = 0; e < mesh.ElementCount; e++)
+        {
+            var element = (FiniteElement1D)mesh.GetElement(e);
+            double xMid = 0.5 * (element.LeftX + element.RightX);
+
+            double uNum = EvaluateSolutionAtPoint(mesh, numerical, xMid);
+            double uExact = exact.Value(xMid, time);
+
+            double err = uNum - uExact;
+            sum += err * err;
+            count++;
+        }
+
+        return Math.Sqrt(sum / count);
+    }
+
+    private static double ComputeL2ErrorIntegral(
+    ISpaceMesh mesh,
+    IReadOnlyList<double> q,
+    IExactSolution exact,
+    double time)
+    {
+        double integral = 0.0;
+
+        for (int e = 0; e < mesh.ElementCount; e++)
+        {
+            var element = (FiniteElement1D)mesh.GetElement(e);
+
+            double xL = element.LeftX;
+            double xR = element.RightX;
+            double h = xR - xL;
+
+            double mid = 0.5 * (xL + xR);
+
+            // 3-точечная квадратура Гаусса
+            double xi = Math.Sqrt(0.6);
+
+            double x1 = mid;
+            double x2 = mid + xi * h / 2.0;
+            double x3 = mid - xi * h / 2.0;
+
+            double uNum1 = EvaluateSolutionAtPoint(mesh, q, x1);
+            double uNum2 = EvaluateSolutionAtPoint(mesh, q, x2);
+            double uNum3 = EvaluateSolutionAtPoint(mesh, q, x3);
+
+            double e1 = exact.Value(x1, time) - uNum1;
+            double e2 = exact.Value(x2, time) - uNum2;
+            double e3 = exact.Value(x3, time) - uNum3;
+
+            integral += h * (8.0 * e1 * e1 + 5.0 * (e2 * e2 + e3 * e3));
+        }
+
+        integral /= 18.0;
+
+        return Math.Sqrt(integral);
+    }
+
     private static object SolveAllLayers(
         string name,
         ISpaceMesh spaceMesh,
         ITimeMesh timeMesh,
         ICoefficients coeffs,
-        IExactSolution ?exact,
+        IExactSolution exact,
         IBoundaryConditions bc,
         ITimeIntegrator integrator,
         double[] u0)
@@ -746,7 +832,7 @@ public static class ProgramRunner
         var residuals = new List<double[]> { Array.Empty<double>() };
         var current = (double[])u0.Clone();
 
-        Console.WriteLine($"Метод {name}");
+        Console.WriteLine($"Метод {name} | Узлов: {spaceMesh.NodeCount}");
         for (int step = 0; step < timeMesh.TimeStepCount; step++)
         {
             double tPrev = timeMesh.GetTimePoint(step);
@@ -760,15 +846,16 @@ public static class ProgramRunner
             residuals.Add((double[])integrator.LastResidualHistory.Clone());
 
             double lastResidual = integrator.LastResidualHistory.Length == 0 ? 0.0 : integrator.LastResidualHistory[^1];
-            Console.WriteLine(
-                $"  слой {step + 1}: t_prev={tPrev.ToString("F6", CultureInfo.InvariantCulture)}, t={tNext.ToString("F6", CultureInfo.InvariantCulture)}, dt={dt.ToString("F6", CultureInfo.InvariantCulture)}, итераций={integrator.LastIterationsCount}, невязка={lastResidual:E3}");
+                double errL2 = ComputeL2ErrorIntegral(spaceMesh, current, exact, tNext);
 
-            // Если есть точное решение, вычисляем ошибку по дискретной L2 норме
-            if (exact is not null)
-            {
-                double maxError = ComputeDiscreteL2Error(spaceMesh, current, exact, tNext);
-                Console.WriteLine($"    max|u-u*| = {maxError:E6}");
-            }
+                Console.WriteLine(
+                $"  слой {step + 1}: " +
+                $"t_prev={tPrev.ToString("F6", CultureInfo.InvariantCulture)}, " +
+                $"t={tNext.ToString("F6", CultureInfo.InvariantCulture)}, " +
+                $"dt={dt.ToString("F6", CultureInfo.InvariantCulture)}, " +
+                $"итераций={integrator.LastIterationsCount}, " +
+                $"невязка={lastResidual:E3}, " +
+                $"L2={errL2:E6}");
         }
 
         return new

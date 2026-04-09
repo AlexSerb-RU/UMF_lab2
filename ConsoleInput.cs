@@ -11,11 +11,19 @@ public record InteractiveSetup(
     IReadOnlyList<double> SpaceNodes,
     IReadOnlyList<double> TimePoints,
     ICoefficients Coefficients,
-    IExactSolution? ExactSolution,
+    IExactSolution ExactSolution,
     IBoundaryConditions BoundaryConditions,
     IInitialCondition InitialCondition,
     SolverDefinition Solver,
     string TestName);
+
+public record CoefficientRegion(
+    double XFrom,
+    double XTo,
+    double Lambda,
+    double Sigma0,
+    double Sigma1,
+    double SigmaEps);
 
 public class SolverDefinition
 {
@@ -25,118 +33,6 @@ public class SolverDefinition
     public int NewtonMaxIterations { get; set; } = 50;
     public double PicardRelaxation { get; set; } = 1.0;
     public double NewtonRelaxation { get; set; } = 1.0;
-}
-
-public class PiecewiseVariant11Coefficients : ICoefficients
-{
-    public class Region
-    {
-        public double XFrom { get; init; }
-        public double XTo { get; init; }
-        public double Lambda { get; init; } = 1.0;
-        public double Sigma0 { get; init; } = 1.0;
-        public double Sigma1 { get; init; }
-        public double SigmaEps { get; init; } = 1e-6;
-        public double F { get; init; }
-    }
-
-    private readonly List<Region> _regions;
-
-    public PiecewiseVariant11Coefficients(IEnumerable<Region> regions)
-    {
-        _regions = [.. regions.OrderBy(r => r.XFrom)];
-        if (_regions.Count == 0)
-        {
-            throw new ArgumentException("At least one coefficient region must be specified.");
-        }
-        foreach (var region in _regions)
-        {
-            if (region.XTo <= region.XFrom)
-            {
-                throw new ArgumentException("Coefficient region must satisfy x_to > x_from.");
-            }
-        }
-    }
-
-    private Region GetRegion(double x)
-    {
-        foreach (var region in _regions)
-        {
-            if (x >= region.XFrom - 1e-12 && x <= region.XTo + 1e-12)
-            {
-                return region;
-            }
-        }
-        return _regions[^1];
-    }
-
-    public double Lambda(double x, double t = 0.0) => GetRegion(x).Lambda;
-
-    public double Sigma(double dudx, double x, double t = 0.0)
-    {
-        var r = GetRegion(x);
-        double eps = Math.Max(1e-12, r.SigmaEps);
-        return r.Sigma0 + r.Sigma1 * dudx;
-    }
-
-    public double DSigmaDDuDx(double dudx, double x, double t = 0.0)
-    {
-        var r = GetRegion(x);
-        double eps = Math.Max(1e-12, r.SigmaEps);
-        return r.Sigma1 * dudx / Math.Sqrt(dudx * dudx + eps * eps);
-    }
-
-    // МЕНЯТЬ
-    public double F(double x, double t = 0.0) => -2*t + (1 + 2*x*t + t)*(x*x + x);
-}
-
-public class SimpleBoundaryConditions : IBoundaryConditions
-{
-    public SimpleBoundaryConditions(
-        BoundaryType leftType,
-        BoundaryType rightType,
-        Func<double, double> leftValue,
-        Func<double, double> rightValue,
-        Func<double, double>? leftBeta = null,
-        Func<double, double>? rightBeta = null)
-    {
-        LeftType = leftType;
-        RightType = rightType;
-        _leftValue = leftValue;
-        _rightValue = rightValue;
-        _leftBeta = leftBeta ?? (_ => 0.0);
-        _rightBeta = rightBeta ?? (_ => 0.0);
-    }
-
-    private readonly Func<double, double> _leftValue;
-    private readonly Func<double, double> _rightValue;
-    private readonly Func<double, double> _leftBeta;
-    private readonly Func<double, double> _rightBeta;
-
-    public BoundaryType LeftType { get; }
-    public BoundaryType RightType { get; }
-
-    public double LeftValue(double t) => _leftValue(t);
-    public double RightValue(double t) => _rightValue(t);
-    public double LeftBeta(double t) => _leftBeta(t);
-    public double RightBeta(double t) => _rightBeta(t);
-}
-
-public class FunctionInitialCondition : IInitialCondition
-{
-    private readonly Func<double, double> _func;
-    public FunctionInitialCondition(Func<double, double> func) => _func = func;
-    public double Value(double x) => _func(x);
-}
-
-public class TestDefinition
-{
-    public string Name { get; set; } = "unnamed_test";
-    public MeshDefinition Mesh { get; set; } = new();
-    public CoefficientsDefinition Coefficients { get; set; } = new();
-    public BoundaryConditionsDefinition BoundaryConditions { get; set; } = new();
-    public InitialConditionDefinition InitialCondition { get; set; } = new();
-    public SolverDefinition Solver { get; set; } = new();
 }
 
 public class MeshDefinition
@@ -158,50 +54,146 @@ public class IntervalSplitDefinition
     public double Q { get; set; } = 1.0;
 }
 
-public class CoefficientsDefinition
+public class TestDefinition
 {
-    public double? Lambda { get; set; }
-    public double? Sigma0 { get; set; }
-    public double? Sigma1 { get; set; }
-    public double SigmaEps { get; set; } = 1e-6;
-    public double? F { get; set; }
-    public CoefficientRegionDefinition[]? Regions { get; set; }
+    public string Name { get; set; } = "unnamed_test";
+    public MeshDefinition Mesh { get; set; } = new();
+    public string Dataset { get; set; } = "";
+    public SolverDefinition Solver { get; set; } = new();
 }
 
-public class CoefficientRegionDefinition
+public class SimpleBoundaryConditions(
+    BoundaryType leftType,
+    BoundaryType rightType,
+    Func<double, double> leftValue,
+    Func<double, double> rightValue) : IBoundaryConditions
 {
-    public double XFrom { get; set; }
-    public double XTo { get; set; }
-    public double Lambda { get; set; } = 1.0;
-    public double Sigma0 { get; set; } = 1.0;
-    public double Sigma1 { get; set; }
-    public double SigmaEps { get; set; } = 1e-6;
-    public double F { get; set; }
+    public BoundaryType LeftType { get; } = leftType;
+    public BoundaryType RightType { get; } = rightType;
+
+    public double LeftValue(double t) => leftValue(t);
+    public double RightValue(double t) => rightValue(t);
 }
 
-public class BoundaryConditionsDefinition
+public class FunctionInitialCondition : IInitialCondition
 {
-    public BoundarySideDefinition Left { get; set; } = new();
-    public BoundarySideDefinition Right { get; set; } = new();
+    private readonly Func<double, double> _func;
+    public FunctionInitialCondition(Func<double, double> func) => _func = func;
+    public double Value(double x) => _func(x);
 }
 
-public class BoundarySideDefinition
+public class ManufacturedSolution : IManufacturedSolution, IExactSolution
 {
-    public string Type { get; set; } = "Dirichlet";
-    public double Value { get; set; }
-    public double Beta { get; set; }
+    private readonly Func<double, double, double> _u;
+    private readonly Func<double, double, double> _ux;
+    private readonly Func<double, double, double> _uxx;
+    private readonly Func<double, double, double> _ut;
+
+    public ManufacturedSolution(
+        Func<double, double, double> u,
+        Func<double, double, double> ux,
+        Func<double, double, double> uxx,
+        Func<double, double, double> ut)
+    {
+        _u = u;
+        _ux = ux;
+        _uxx = uxx;
+        _ut = ut;
+    }
+
+    public double U(double x, double t) => _u(x, t);
+    public double Ux(double x, double t) => _ux(x, t);
+    public double Uxx(double x, double t) => _uxx(x, t);
+    public double Ut(double x, double t) => _ut(x, t);
+    public double Value(double x, double t) => _u(x, t);
 }
 
-public class InitialConditionDefinition
+/// <summary>
+/// Класс коэффициентов, который строит F по аналитическому решению, заданному в виде IManufacturedSolution. 
+/// Позволяет тестировать численный метод на искусственно созданных решениях. 
+/// В данном случае F(x,t) = Sigma(u_x, x, t) * u_t - Lambda(x, t) * u_xx, где u - заданное аналитическое решение. 
+/// Коэффициенты Sigma и Lambda могут быть заданы как кусочно-постоянные функции от x (через CoefficientRegion), 
+/// а также могут зависеть от u_x (для Sigma).
+/// </summary>
+public class ManufacturedCoefficients : ICoefficients
 {
-    public string Type { get; set; } = "sin_pi";
-    public double Value { get; set; }
-    public double Slope { get; set; } = 1.0;
+    private readonly IManufacturedSolution _solution;
+    private readonly List<CoefficientRegion> _regions;
+
+    public ManufacturedCoefficients(IManufacturedSolution solution, IEnumerable<CoefficientRegion> regions)
+    {
+        _solution = solution;
+        _regions = regions.OrderBy(r => r.XFrom).ToList();
+    }
+
+    private CoefficientRegion Region(double x)
+    {
+        foreach (var r in _regions)
+            if (x >= r.XFrom - 1e-12 && x <= r.XTo + 1e-12)
+                return r;
+        return _regions[^1];
+    }
+
+    public double Lambda(double x, double t = 0.0) => Region(x).Lambda;
+
+    public double Sigma(double dudx, double x, double t = 0.0)
+    {
+        var r = Region(x);
+        return r.Sigma0 + r.Sigma1 * Math.Sqrt(dudx * dudx/* + r.SigmaEps * r.SigmaEps*/);
+    }
+
+    public double DSigmaDDuDx(double dudx, double x, double t = 0.0)
+    {
+        var r = Region(x);
+        return r.Sigma1 * dudx / Math.Sqrt(dudx * dudx/* + r.SigmaEps * r.SigmaEps*/);
+    }
+
+    public double F(double x, double t = 0.0)
+    {
+        var ux = _solution.Ux(x, t);
+        var ut = _solution.Ut(x, t);
+        var uxx = _solution.Uxx(x, t);
+
+        return Sigma(ux, x, t) * ut - Lambda(x, t) * uxx;
+    }
 }
 
-public class FunctionExactSolution(Func<double, double, double> func) : IExactSolution
+public static class DatasetFactory
 {
-    public double Value(double x, double t) => func(x, t);
+    public static (IExactSolution exact, ICoefficients coeffs, IBoundaryConditions bc, IInitialCondition ic)
+        Create(string datasetName, double xLeft, double xRight)
+    {
+        return datasetName.Trim().ToLowerInvariant() switch
+        {
+            "x2_const_lambda_sigma" => BuildX2Const(xLeft, xRight),
+            _ => throw new InvalidOperationException($"Неизвестный набор данных: {datasetName}")
+        };
+    }
+
+    private static (IExactSolution, ICoefficients, IBoundaryConditions, IInitialCondition)
+        BuildX2Const(double xLeft, double xRight)
+    {
+        var exact = new ManufacturedSolution(
+            (x, t) => x * t,  // Решение u(x,t) = x^2
+            (x, t) => t,  // Производная по x: u_x = 2x
+            (x, t) => 0,  // u_xx
+            (x, t) => x);  // Производная по t: u_t = 0
+
+        var coeffs = new ManufacturedCoefficients(exact,
+        [
+            new CoefficientRegion(xLeft, xRight, Lambda: 1.0, Sigma0: 0.0, Sigma1: 1.0/100.0, SigmaEps: 1e-6)
+        ]);
+
+        var bc = new SimpleBoundaryConditions(
+            BoundaryType.Dirichlet,
+            BoundaryType.Dirichlet,
+            t => exact.U(xLeft, t),
+            t => exact.U(xRight, t));
+
+        var ic = new FunctionInitialCondition(x => exact.U(x, 0.0));
+
+        return (exact, coeffs, bc, ic);
+    }
 }
 
 public static class ConsoleInput
@@ -244,24 +236,17 @@ public static class ConsoleInput
         ValidateIncreasing(timePoints, "TimePoints");
         ValidateIncreasing(spaceNodes, "SpaceNodes");
 
-        var coeffs = BuildCoefficients(test.Coefficients, spaceNodes[0], spaceNodes[^1]);
+        var (exact, coeffs, bc, ic) = DatasetFactory.Create(test.Dataset, spaceNodes[0], spaceNodes[^1]);
 
-        // Аналитическая функция (ХАРДКОД)
-        var exact = new FunctionExactSolution((x, t) => x + t);
-
-        // Граничные условия
-        var bc = new SimpleBoundaryConditions(
-            ParseBoundaryType(test.BoundaryConditions.Left.Type),
-            ParseBoundaryType(test.BoundaryConditions.Right.Type),
-            // ЗАДАТЬ
-            t => 5,
-            t => 30*t + 5,
-            t => test.BoundaryConditions.Left.Beta,
-            t => test.BoundaryConditions.Right.Beta);
-
-        var ic = BuildInitialCondition(test.InitialCondition);
-
-        return new InteractiveSetup(spaceNodes, timePoints, coeffs, exact, bc, ic, test.Solver, test.Name);
+        return new InteractiveSetup(
+            spaceNodes,
+            timePoints,
+            coeffs,
+            exact,
+            bc,
+            ic,
+            test.Solver,
+            test.Name);
     }
 
     private static IReadOnlyList<double> BuildAxisNodes(AxisMeshDefinition axis, string axisName)
@@ -330,54 +315,6 @@ public static class ConsoleInput
         return nodes;
     }
 
-    private static ICoefficients BuildCoefficients(CoefficientsDefinition definition, double xLeft, double xRight)
-    {
-        if (definition.Regions is { Length: > 0 })
-        {
-            var regions = definition.Regions.Select(r => new PiecewiseVariant11Coefficients.Region
-            {
-                XFrom = r.XFrom,
-                XTo = r.XTo,
-                Lambda = r.Lambda,
-                Sigma0 = r.Sigma0,
-                Sigma1 = r.Sigma1,
-                SigmaEps = r.SigmaEps,
-                F = r.F
-            });
-            return new PiecewiseVariant11Coefficients(regions);
-        }
-
-        return new PiecewiseVariant11Coefficients(new[]
-        {
-            new PiecewiseVariant11Coefficients.Region
-            {
-                XFrom = xLeft,
-                XTo = xRight,
-                Lambda = definition.Lambda ?? 1.0,
-                Sigma0 = definition.Sigma0 ?? 1.0,
-                Sigma1 = definition.Sigma1 ?? 0.0,
-                SigmaEps = definition.SigmaEps,
-                F = definition.F ?? 0.0
-            }
-        });
-    }
-
-    private static IInitialCondition BuildInitialCondition(InitialConditionDefinition definition)
-    {
-        return definition.Type.Trim().ToLowerInvariant() switch
-        {
-            "zero" => new FunctionInitialCondition(_ => 0.0),
-            "constant" => new FunctionInitialCondition(_ => definition.Value),
-            "linear" => new FunctionInitialCondition(x => definition.Value + definition.Slope * x),
-            "sin_pi" => new FunctionInitialCondition(x => Math.Sin(Math.PI * x)),
-            "test1" => new FunctionInitialCondition(x => 3),
-            "test2" => new FunctionInitialCondition(x => 5),
-            "test3" => new FunctionInitialCondition(x => 5),
-            "test4" => new FunctionInitialCondition(x => 5),
-            _ => throw new InvalidOperationException($"Неизвестный тип начального условия: {definition.Type}")
-        };
-    }
-
     private static void ValidateIncreasing(IReadOnlyList<double> values, string name)
     {
         if (values.Count < 2) throw new InvalidOperationException($"{name}: требуется как минимум две точки.");
@@ -387,12 +324,4 @@ public static class ConsoleInput
         }
     }
 
-    private static BoundaryType ParseBoundaryType(string s)
-        => s.Trim().ToLowerInvariant() switch
-        {
-            "dirichlet" or "d" => BoundaryType.Dirichlet,
-            "neumann" or "n" => BoundaryType.Neumann,
-            "robin" or "r" => BoundaryType.Robin,
-            _ => throw new InvalidOperationException($"Неизвестный тип краевого условия: {s}")
-        };
 }

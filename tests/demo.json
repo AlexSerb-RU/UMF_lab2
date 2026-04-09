@@ -1,73 +1,23 @@
 {
-  "name": "demo",
+  "name": "space_x2_const",
   "mesh": {
     "space": {
-      "referencePoints": [ 0.0, 0.4, 1.0 ],
+      "referencePoints": [ 0.0, 1.0 ],
       "splits": [
         {
-          "count": 4,
-          "q": 2.0
-        },
-        {
-          "count": 6,
+          "count": 10,
           "q": 1.0
         }
       ]
     },
     "time": {
-      "referencePoints": [ 0.0, 0.5, 1.0 ],
-      "splits": [
-        {
-          "count": 3,
-          "q": 2.0
-        },
-        {
-          "count": 4,
-          "q": 1.5
-        }
-      ]
+      "nodes": [ 0.0, 1.0 ]
     }
   },
-  "coefficients": {
-    "regions": [
-      {
-        "xFrom": 0.0,
-        "xTo": 0.4,
-        "lambda": 1.0,
-        "sigma0": 1.0,
-        "sigma1": 0.2,
-        "sigmaEps": 1e-6,
-        "f": 0.0
-      },
-      {
-        "xFrom": 0.4,
-        "xTo": 1.0,
-        "lambda": 2.0,
-        "sigma0": 1.2,
-        "sigma1": 0.1,
-        "sigmaEps": 1e-6,
-        "f": 0.0
-      }
-    ]
-  },
-  "boundaryConditions": {
-    "left": {
-      "type": "Dirichlet",
-      "value": 0.0,
-      "beta": 0.0
-    },
-    "right": {
-      "type": "Dirichlet",
-      "value": 0.0,
-      "beta": 0.0
-    }
-  },
-  "initialCondition": {
-    "type": "sin_pi"
-  },
+  "dataset": "x2_const_lambda_sigma",
   "solver": {
-    "primaryMethod": "picard",
-    "tolerance": 1e-8,
+    "primaryMethod": "both",
+    "tolerance": 1e-15,
     "picardMaxIterations": 300,
     "newtonMaxIterations": 50,
     "picardRelaxation": 1.0,
